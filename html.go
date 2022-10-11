@@ -13,6 +13,7 @@ import (
 )
 
 func handleNewPage(linksChan chan Link, db *bun.DB, rdb *redis.Client) {
+	log.Println("Started goroutine.")
 	for {
 		link := <-linksChan
 
@@ -39,6 +40,7 @@ func extractFromPage(originUrl string, link Link, db *bun.DB, linksChan chan<- L
 	url, err := url.Parse(link.DestUrl)
 	if err != nil {
 		log.Printf("URL: %v. Url parsing error. err=%v", link.DestUrl, err)
+		return
 	}
 
 	resp, err := http.Get(url.String())
@@ -53,8 +55,7 @@ func extractFromPage(originUrl string, link Link, db *bun.DB, linksChan chan<- L
 		return
 	}
 
-	rawHtml := resp.Body
-	rootNode, err := html.Parse(rawHtml)
+	rootNode, err := html.Parse(resp.Body)
 	if err != nil {
 		log.Printf("URL: %v. html parsing error. err=%v", url, err)
 		dbErr := GetErr{Url: url.String(), ParsingError: true, Time: time.Now()}
@@ -63,20 +64,32 @@ func extractFromPage(originUrl string, link Link, db *bun.DB, linksChan chan<- L
 		return
 	}
 
-	getAllLinks(url.Hostname(), rootNode, linksChan)
+	getAllLinks(url, rootNode, linksChan)
 	err = resp.Body.Close()
 	check(err)
 }
 
 // gets all links starting at a given html node
 // all found links are send to a go channel
-func getAllLinks(originUrl string, node *html.Node, links chan<- Link) {
+func getAllLinks(originUrl *url.URL, node *html.Node, links chan<- Link) {
 	extractLink := func(c *html.Node) {
 		for _, a := range c.Attr {
 			if a.Key == "href" {
+				linkDst, err := url.Parse(a.Val)
+				if err != nil {
+					log.Println("Malformed url:", a.Val)
+					break
+				}
+
+				if linkDst.Hostname() == "" {
+					linkDst.Host = originUrl.Host
+					linkDst.Scheme = originUrl.Scheme
+					// log.Printf("Corrected url from %v to %v", a.Val, linkDst.String())
+				}
+
 				link := Link{
-					OrigUrl: originUrl,
-					DestUrl: a.Val,
+					OrigUrl: originUrl.String(),
+					DestUrl: linkDst.String(),
 					// LinkText: c.,
 					TimeFound: time.Now(),
 				}
@@ -87,7 +100,7 @@ func getAllLinks(originUrl string, node *html.Node, links chan<- Link) {
 		}
 	}
 
-	for c := node.FirstChild; c != nil; c = c.NextSibling {
+	for c := node; c != nil; c = c.NextSibling {
 		extractLink(c)
 		if c.FirstChild != nil {
 			getAllLinks(originUrl, c.FirstChild, links)

@@ -26,7 +26,7 @@ func main() {
 
 	rdb := getRedisClient()
 	db := getDb("testDb001.sqlite")
-	linksChan := make(chan Link, 10)
+	linksChan := make(chan Link, 1e6)
 
 	linksChan <- Link{TimeFound: time.Now(), DestUrl: testUrl}
 
@@ -41,6 +41,8 @@ func main() {
 		check(err)
 		log.Printf("Visited %v links", visited)
 	}
+
+	// are bun db inserts save for concurency?
 }
 
 func check(err error) {
