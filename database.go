@@ -46,6 +46,8 @@ func getDb(dbPath string) *bun.DB {
 		check(err)
 		_, err = db.NewCreateTable().Model(&GetErr{}).Exec(context.Background())
 		check(err)
+		_, err = db.NewCreateTable().Model(&Content{}).Exec(context.Background())
+		check(err)
 	}
 
 	return db

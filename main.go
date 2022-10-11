@@ -1,31 +1,49 @@
 package main
 
 import (
+	"crypto/sha512"
 	"log"
+	"sync"
 	"time"
 )
 
 type Link struct {
+	ID        int64 `bun:",pk,autoincrement"`
 	TimeFound time.Time
 	OrigUrl   string
 	DestUrl   string
 	LinkText  string
 }
 
+type Content struct {
+	ID          int64 `bun:",pk,autoincrement"`
+	TimeFound   time.Time
+	Url         string
+	ContentType string
+	Hash        [sha512.Size]byte
+}
+
 type GetErr struct {
+	ID             int64 `bun:",pk,autoincrement"`
 	Time           time.Time
 	Url            string
-	ParsingError   bool // shall be true if the error has been a parsing error
-	HttpStatusCode int  // shall be zero if the error has been a parsing error
+	ParsingError   bool
+	ResponseToBig  bool
+	ErrorReading   bool
+	HttpStatusCode int
 }
 
 const createNewDb = true
+
+var lockDb sync.Mutex
 
 func main() {
 	const testUrl = "https://crawler-test.com/"
 
 	rdb := getRedisClient()
-	db := getDb("testDb001.sqlite")
+	defer rdb.Close()
+	db := getDb("testDb002.sqlite")
+	defer db.Close()
 	linksChan := make(chan Link, 1e6)
 
 	linksChan <- Link{TimeFound: time.Now(), DestUrl: testUrl}
@@ -41,8 +59,6 @@ func main() {
 		check(err)
 		log.Printf("Visited %v links", visited)
 	}
-
-	// are bun db inserts save for concurency?
 }
 
 func check(err error) {

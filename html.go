@@ -1,7 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha512"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -18,8 +21,10 @@ func handleNewPage(linksChan chan Link, db *bun.DB, rdb *redis.Client) {
 		link := <-linksChan
 
 		// add link to database
+		lockDb.Lock()
 		_, err := db.NewInsert().Model(&link).Exec(context.Background())
 		handleSqliteErr(err)
+		lockDb.Unlock()
 
 		// query redis
 		done, err := rdb.SIsMember("visitedLinks", link.DestUrl).Result()
@@ -50,23 +55,56 @@ func extractFromPage(originUrl string, link Link, db *bun.DB, linksChan chan<- L
 		if resp != nil {
 			dbErr.HttpStatusCode = resp.StatusCode
 		}
+		lockDb.Lock()
 		_, err = db.NewInsert().Model(&dbErr).Exec(context.Background())
 		handleSqliteErr(err)
+		lockDb.Unlock()
 		return
 	}
 
-	rootNode, err := html.Parse(resp.Body)
+	if resp.ContentLength >= 1e8 {
+		log.Printf("URL: %v. Webpage is to big.", url.String())
+		dbErr := GetErr{Url: url.String(), Time: time.Now(), ResponseToBig: true}
+		lockDb.Lock()
+		_, err = db.NewInsert().Model(&dbErr).Exec(context.Background())
+		handleSqliteErr(err)
+		lockDb.Unlock()
+		return
+	}
+
+	// read body
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Printf("URL: %v. Error reading response body", url.String())
+		dbErr := GetErr{Url: url.String(), Time: time.Now(), ErrorReading: true}
+		lockDb.Lock()
+		_, err = db.NewInsert().Model(&dbErr).Exec(context.Background())
+		handleSqliteErr(err)
+		lockDb.Unlock()
+		return
+	}
+	err = resp.Body.Close()
+	check(err)
+
+	// Retrieve content information
+	content := Content{Url: url.String(), ContentType: http.DetectContentType(body[:512]), Hash: sha512.Sum512(body)}
+	lockDb.Lock()
+	_, err = db.NewInsert().Model(&content).Exec(context.Background())
+	handleSqliteErr(err)
+	lockDb.Unlock()
+
+	rootNode, err := html.Parse(bytes.NewReader(body))
 	if err != nil {
 		log.Printf("URL: %v. html parsing error. err=%v", url, err)
 		dbErr := GetErr{Url: url.String(), ParsingError: true, Time: time.Now()}
+		lockDb.Lock()
 		_, err = db.NewInsert().Model(&dbErr).Exec(context.Background())
 		handleSqliteErr(err)
+		lockDb.Unlock()
 		return
 	}
 
 	getAllLinks(url, rootNode, linksChan)
-	err = resp.Body.Close()
-	check(err)
 }
 
 // gets all links starting at a given html node
@@ -74,7 +112,7 @@ func extractFromPage(originUrl string, link Link, db *bun.DB, linksChan chan<- L
 func getAllLinks(originUrl *url.URL, node *html.Node, links chan<- Link) {
 	extractLink := func(c *html.Node) {
 		for _, a := range c.Attr {
-			if a.Key == "href" {
+			if a.Key == "href" || a.Key == "src" {
 				linkDst, err := url.Parse(a.Val)
 				if err != nil {
 					log.Println("Malformed url:", a.Val)
@@ -95,7 +133,6 @@ func getAllLinks(originUrl *url.URL, node *html.Node, links chan<- Link) {
 				}
 
 				links <- link
-				break
 			}
 		}
 	}
