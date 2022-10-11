@@ -13,8 +13,6 @@ import (
 )
 
 func handleNewPage(linksChan chan Link, db *bun.DB, rdb *redis.Client) {
-	var dbErr GetErr
-
 	for {
 		link := <-linksChan
 
@@ -29,29 +27,7 @@ func handleNewPage(linksChan chan Link, db *bun.DB, rdb *redis.Client) {
 			continue
 		}
 
-		url, err := url.Parse(link.DestUrl)
-		if err != nil {
-			log.Printf("URL: %v. Url parsing error. err=%v", link.DestUrl, err)
-		}
-
-		resp, err := http.Get(url.String())
-		if err != nil {
-			log.Printf("URL: %v. html get error. err=%v", url.String(), err)
-			dbErr = GetErr{Url: url.String(), HttpStatusCode: resp.StatusCode, Time: time.Now()}
-			_, err = db.NewInsert().Model(&dbErr).Exec(context.Background())
-			handleSqliteErr(err)
-		}
-
-		rawHtml := resp.Body
-		rootNode, err := html.Parse(rawHtml)
-		if err != nil {
-			log.Printf("URL: %v. html parsing error. err=%v", url, err)
-			dbErr = GetErr{Url: url.String(), ParsingError: true, Time: time.Now()}
-			_, err = db.NewInsert().Model(&dbErr).Exec(context.Background())
-			handleSqliteErr(err)
-		}
-
-		getAllLinks(url.Hostname(), rootNode, linksChan)
+		go extractFromPage(link.OrigUrl, link, db, linksChan)
 
 		// set link to done in redis
 		err = rdb.SAdd("visitedLinks", link.DestUrl).Err()
@@ -59,21 +35,54 @@ func handleNewPage(linksChan chan Link, db *bun.DB, rdb *redis.Client) {
 	}
 }
 
+func extractFromPage(originUrl string, link Link, db *bun.DB, linksChan chan<- Link) {
+	url, err := url.Parse(link.DestUrl)
+	if err != nil {
+		log.Printf("URL: %v. Url parsing error. err=%v", link.DestUrl, err)
+	}
+
+	resp, err := http.Get(url.String())
+	if err != nil {
+		log.Printf("URL: %v. html get error. err=%v", url.String(), err)
+		dbErr := GetErr{Url: url.String(), Time: time.Now()}
+		if resp != nil {
+			dbErr.HttpStatusCode = resp.StatusCode
+		}
+		_, err = db.NewInsert().Model(&dbErr).Exec(context.Background())
+		handleSqliteErr(err)
+		return
+	}
+
+	rawHtml := resp.Body
+	rootNode, err := html.Parse(rawHtml)
+	if err != nil {
+		log.Printf("URL: %v. html parsing error. err=%v", url, err)
+		dbErr := GetErr{Url: url.String(), ParsingError: true, Time: time.Now()}
+		_, err = db.NewInsert().Model(&dbErr).Exec(context.Background())
+		handleSqliteErr(err)
+		return
+	}
+
+	getAllLinks(url.Hostname(), rootNode, linksChan)
+	err = resp.Body.Close()
+	check(err)
+}
+
 // gets all links starting at a given html node
 // all found links are send to a go channel
 func getAllLinks(originUrl string, node *html.Node, links chan<- Link) {
 	extractLink := func(c *html.Node) {
-		if c.Type == html.ElementNode && c.Data == "a" {
-			for _, a := range c.Attr {
-				if a.Key == "href" {
-					links <- Link{
-						OrigUrl: originUrl,
-						DestUrl: originUrl + a.Val,
-						// LinkText: c.,
-						TimeFound: time.Now(),
-					}
-					break
+		for _, a := range c.Attr {
+			if a.Key == "href" {
+				link := Link{
+					OrigUrl: originUrl,
+					DestUrl: a.Val,
+					// LinkText: c.,
+					TimeFound: time.Now(),
 				}
+
+				links <- link
+				break
 			}
 		}
 	}

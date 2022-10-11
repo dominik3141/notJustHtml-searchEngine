@@ -22,13 +22,13 @@ type GetErr struct {
 const createNewDb = true
 
 func main() {
-	const testUrl = "https://heise.de"
+	const testUrl = "https://crawler-test.com/"
 
 	rdb := getRedisClient()
 	db := getDb("testDb001.sqlite")
 	linksChan := make(chan Link, 10)
 
-	linksChan <- Link{DestUrl: testUrl}
+	linksChan <- Link{TimeFound: time.Now(), DestUrl: testUrl}
 
 	for i := 1; i < 2; i++ {
 		go handleNewPage(linksChan, db, rdb)

@@ -22,6 +22,8 @@ func getDb(dbPath string) *bun.DB {
 	var err error
 
 	if createNewDb {
+		err = os.Remove(dbPath)
+		check(err)
 		f, err := os.Create(dbPath)
 		check(err)
 		f.Close()
