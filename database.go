@@ -44,7 +44,7 @@ func getDb(dbPath string) *bun.DB {
 	if createNewDb {
 		_, err = db.NewCreateTable().Model(&Link{}).Exec(context.Background())
 		check(err)
-		_, err = db.NewCreateTable().Model(&GetErr{}).Exec(context.Background())
+		_, err = db.NewCreateTable().Model(&Errors{}).Exec(context.Background())
 		check(err)
 		_, err = db.NewCreateTable().Model(&Content{}).Exec(context.Background())
 		check(err)

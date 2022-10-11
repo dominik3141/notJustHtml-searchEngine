@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/sha512"
 	"log"
+	"os"
 	"sync"
 	"time"
 )
@@ -20,10 +21,11 @@ type Content struct {
 	TimeFound   time.Time
 	Url         string
 	ContentType string
+	Size        int
 	Hash        [sha512.Size]byte
 }
 
-type GetErr struct {
+type Errors struct {
 	ID             int64 `bun:",pk,autoincrement"`
 	Time           time.Time
 	Url            string
@@ -38,17 +40,18 @@ const createNewDb = true
 var lockDb sync.Mutex
 
 func main() {
-	const testUrl = "https://crawler-test.com/"
+	testUrl := os.Args[1]
+	log.Printf("Starting to crawl at: %v", testUrl)
 
 	rdb := getRedisClient()
 	defer rdb.Close()
-	db := getDb("testDb002.sqlite")
+	db := getDb("testDb004.sqlite")
 	defer db.Close()
-	linksChan := make(chan Link, 1e6)
+	linksChan := make(chan *Link, 1e4)
 
-	linksChan <- Link{TimeFound: time.Now(), DestUrl: testUrl}
+	linksChan <- &Link{TimeFound: time.Now(), DestUrl: testUrl}
 
-	for i := 1; i < 2; i++ {
+	for i := 1; i < 10; i++ {
 		go handleNewPage(linksChan, db, rdb)
 	}
 

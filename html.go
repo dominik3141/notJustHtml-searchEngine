@@ -15,7 +15,7 @@ import (
 	"golang.org/x/net/html"
 )
 
-func handleNewPage(linksChan chan Link, db *bun.DB, rdb *redis.Client) {
+func handleNewPage(linksChan chan *Link, db *bun.DB, rdb *redis.Client) {
 	log.Println("Started goroutine.")
 	for {
 		link := <-linksChan
@@ -41,7 +41,7 @@ func handleNewPage(linksChan chan Link, db *bun.DB, rdb *redis.Client) {
 	}
 }
 
-func extractFromPage(originUrl string, link Link, db *bun.DB, linksChan chan<- Link) {
+func extractFromPage(originUrl string, link *Link, db *bun.DB, linksChan chan<- *Link) {
 	url, err := url.Parse(link.DestUrl)
 	if err != nil {
 		log.Printf("URL: %v. Url parsing error. err=%v", link.DestUrl, err)
@@ -51,7 +51,7 @@ func extractFromPage(originUrl string, link Link, db *bun.DB, linksChan chan<- L
 	resp, err := http.Get(url.String())
 	if err != nil {
 		log.Printf("URL: %v. html get error. err=%v", url.String(), err)
-		dbErr := GetErr{Url: url.String(), Time: time.Now()}
+		dbErr := Errors{Url: url.String(), Time: time.Now()}
 		if resp != nil {
 			dbErr.HttpStatusCode = resp.StatusCode
 		}
@@ -64,7 +64,7 @@ func extractFromPage(originUrl string, link Link, db *bun.DB, linksChan chan<- L
 
 	if resp.ContentLength >= 1e8 {
 		log.Printf("URL: %v. Webpage is to big.", url.String())
-		dbErr := GetErr{Url: url.String(), Time: time.Now(), ResponseToBig: true}
+		dbErr := Errors{Url: url.String(), Time: time.Now(), ResponseToBig: true}
 		lockDb.Lock()
 		_, err = db.NewInsert().Model(&dbErr).Exec(context.Background())
 		handleSqliteErr(err)
@@ -76,7 +76,7 @@ func extractFromPage(originUrl string, link Link, db *bun.DB, linksChan chan<- L
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		log.Printf("URL: %v. Error reading response body", url.String())
-		dbErr := GetErr{Url: url.String(), Time: time.Now(), ErrorReading: true}
+		dbErr := Errors{Url: url.String(), Time: time.Now(), ErrorReading: true}
 		lockDb.Lock()
 		_, err = db.NewInsert().Model(&dbErr).Exec(context.Background())
 		handleSqliteErr(err)
@@ -87,7 +87,7 @@ func extractFromPage(originUrl string, link Link, db *bun.DB, linksChan chan<- L
 	check(err)
 
 	// Retrieve content information
-	content := Content{Url: url.String(), ContentType: http.DetectContentType(body[:512]), Hash: sha512.Sum512(body)}
+	content := Content{Url: url.String(), ContentType: http.DetectContentType(body[:512]), Hash: sha512.Sum512(body), Size: len(body)}
 	lockDb.Lock()
 	_, err = db.NewInsert().Model(&content).Exec(context.Background())
 	handleSqliteErr(err)
@@ -96,7 +96,7 @@ func extractFromPage(originUrl string, link Link, db *bun.DB, linksChan chan<- L
 	rootNode, err := html.Parse(bytes.NewReader(body))
 	if err != nil {
 		log.Printf("URL: %v. html parsing error. err=%v", url, err)
-		dbErr := GetErr{Url: url.String(), ParsingError: true, Time: time.Now()}
+		dbErr := Errors{Url: url.String(), ParsingError: true, Time: time.Now()}
 		lockDb.Lock()
 		_, err = db.NewInsert().Model(&dbErr).Exec(context.Background())
 		handleSqliteErr(err)
@@ -109,13 +109,13 @@ func extractFromPage(originUrl string, link Link, db *bun.DB, linksChan chan<- L
 
 // gets all links starting at a given html node
 // all found links are send to a go channel
-func getAllLinks(originUrl *url.URL, node *html.Node, links chan<- Link) {
+func getAllLinks(originUrl *url.URL, node *html.Node, links chan<- *Link) {
 	extractLink := func(c *html.Node) {
 		for _, a := range c.Attr {
 			if a.Key == "href" || a.Key == "src" {
 				linkDst, err := url.Parse(a.Val)
 				if err != nil {
-					log.Println("Malformed url:", a.Val)
+					// log.Println("Malformed url:", a.Val)
 					break
 				}
 
@@ -126,13 +126,13 @@ func getAllLinks(originUrl *url.URL, node *html.Node, links chan<- Link) {
 				}
 
 				link := Link{
-					OrigUrl: originUrl.String(),
-					DestUrl: linkDst.String(),
-					// LinkText: c.,
+					OrigUrl:   originUrl.String(),
+					DestUrl:   linkDst.String(),
+					LinkText:  c.Data,
 					TimeFound: time.Now(),
 				}
 
-				links <- link
+				links <- &link
 			}
 		}
 	}
