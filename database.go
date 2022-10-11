@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"log"
+	"os"
 
 	"github.com/go-redis/redis"
 	_ "github.com/mattn/go-sqlite3"
@@ -18,18 +19,30 @@ func getRedisClient() *redis.Client {
 }
 
 func getDb(dbPath string) *bun.DB {
+	var err error
+
+	if createNewDb {
+		f, err := os.Create(dbPath)
+		check(err)
+		f.Close()
+	}
+
 	rawDb, err := sql.Open("sqlite3", dbPath)
 	if err != nil {
 		log.Printf("Error opening database. err=%v", err)
+		panic(err)
+	} else if rawDb == nil {
+		log.Printf("Error opening database.")
+		panic(err)
 	}
 
 	db := bun.NewDB(rawDb, sqlitedialect.New())
 
 	// create new tables
-	if createDbTables {
-		_, err = db.NewCreateTable().Model(Link{}).Exec(context.Background())
+	if createNewDb {
+		_, err = db.NewCreateTable().Model(&Link{}).Exec(context.Background())
 		check(err)
-		_, err = db.NewCreateTable().Model(GetErr{}).Exec(context.Background())
+		_, err = db.NewCreateTable().Model(&GetErr{}).Exec(context.Background())
 		check(err)
 	}
 

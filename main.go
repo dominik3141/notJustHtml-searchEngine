@@ -19,7 +19,7 @@ type GetErr struct {
 	HttpStatusCode int  // shall be zero if the error has been a parsing error
 }
 
-const createDbTables = true
+const createNewDb = true
 
 func main() {
 	const testUrl = "https://heise.de"

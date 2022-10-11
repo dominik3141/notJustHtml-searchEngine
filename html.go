@@ -88,4 +88,4 @@ func getAllLinks(originUrl string, node *html.Node, links chan<- Link) {
 
 // search the child nodes of a html link node for a text node
 // an example of that would be a h3 node that serves as the link text
-func getLinkText(linkNode *html.Node) string
+// func getLinkText(linkNode *html.Node) string
