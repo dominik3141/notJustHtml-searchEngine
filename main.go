@@ -52,7 +52,7 @@ func main() {
 
 	rdb := getRedisClient()
 	defer rdb.Close()
-	db := getDb("testDb004.sqlite")
+	db := getDb("testDb006.sqlite")
 	defer db.Close()
 	linksChan := make(chan *Link, 1e4)
 
@@ -62,7 +62,7 @@ func main() {
 	go handleSigTerm(sigChan, db)
 	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT)
 
-	for i := 1; i < 2; i++ {
+	for i := 1; i < 4; i++ {
 		go handleNewPage(linksChan, db, rdb)
 	}
 

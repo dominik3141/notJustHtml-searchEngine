@@ -88,7 +88,7 @@ func extractFromPage(originUrl string, link *Link, db *bun.DB, linksChan chan<- 
 	check(err)
 
 	// Retrieve content information
-	content := Content{Url: url.String(), ContentType: http.DetectContentType(body[:512]), Hash: sha512.Sum512(body), Size: len(body)}
+	content := Content{TimeFound: time.Now(), Url: url.String(), ContentType: http.DetectContentType(body[:512]), Hash: sha512.Sum512(body), Size: len(body)}
 	lockDb.Lock()
 	_, err = db.NewInsert().Model(&content).Exec(context.Background())
 	handleSqliteErr(err)
