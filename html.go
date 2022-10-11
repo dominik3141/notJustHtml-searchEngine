@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha512"
+	"encoding/json"
 	"io"
 	"log"
 	"net/http"
@@ -22,7 +23,7 @@ func handleNewPage(linksChan chan *Link, db *bun.DB, rdb *redis.Client) {
 
 		// add link to database
 		lockDb.Lock()
-		_, err := db.NewInsert().Model(&link).Exec(context.Background())
+		_, err := db.NewInsert().Model(link).Exec(context.Background())
 		handleSqliteErr(err)
 		lockDb.Unlock()
 
@@ -107,6 +108,38 @@ func extractFromPage(originUrl string, link *Link, db *bun.DB, linksChan chan<- 
 	getAllLinks(url, rootNode, linksChan)
 }
 
+type ReducedHtmlNode struct {
+	Type      html.NodeType
+	Data      string
+	Namespace string
+	Attr      []html.Attribute
+	Parent    *ReducedHtmlNode
+}
+
+func reduceHtmlNode(node *html.Node) *ReducedHtmlNode {
+	const depth = 3
+
+	var prevNode *ReducedHtmlNode
+	rootNode := new(ReducedHtmlNode)
+	rootNode.Attr = node.Attr
+	rootNode.Data = node.Data
+	rootNode.Namespace = node.Namespace
+	prevNode = rootNode
+
+	for i := 0; i <= depth && node.Parent != nil; i++ {
+		node = node.Parent
+		rNode := new(ReducedHtmlNode)
+		rNode.Attr = node.Attr
+		rNode.Data = node.Data
+		rNode.Namespace = node.Namespace
+
+		prevNode.Parent = rNode
+		prevNode = rNode
+	}
+
+	return rootNode
+}
+
 // gets all links starting at a given html node
 // all found links are send to a go channel
 func getAllLinks(originUrl *url.URL, node *html.Node, links chan<- *Link) {
@@ -125,11 +158,16 @@ func getAllLinks(originUrl *url.URL, node *html.Node, links chan<- *Link) {
 					// log.Printf("Corrected url from %v to %v", a.Val, linkDst.String())
 				}
 
+				// jsonNode, err := json.MarshalIndent(reduceHtmlNode(c), "", "\t")
+				jsonNode, err := json.Marshal(reduceHtmlNode(c))
+				check(err)
+
 				link := Link{
-					OrigUrl:   originUrl.String(),
-					DestUrl:   linkDst.String(),
-					LinkText:  c.Data,
-					TimeFound: time.Now(),
+					TimeFound:       time.Now(),
+					OrigUrl:         originUrl.String(),
+					DestUrl:         linkDst.String(),
+					LinkText:        c.Data,
+					SurroundingNode: jsonNode,
 				}
 
 				links <- &link

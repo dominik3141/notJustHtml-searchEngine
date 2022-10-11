@@ -4,16 +4,21 @@ import (
 	"crypto/sha512"
 	"log"
 	"os"
+	"os/signal"
 	"sync"
+	"syscall"
 	"time"
+
+	"github.com/uptrace/bun"
 )
 
 type Link struct {
-	ID        int64 `bun:",pk,autoincrement"`
-	TimeFound time.Time
-	OrigUrl   string
-	DestUrl   string
-	LinkText  string
+	ID              int64 `bun:",pk,autoincrement"`
+	TimeFound       time.Time
+	OrigUrl         string
+	DestUrl         string
+	LinkText        string
+	SurroundingNode []byte
 }
 
 type Content struct {
@@ -40,6 +45,8 @@ const createNewDb = true
 var lockDb sync.Mutex
 
 func main() {
+	sigChan := make(chan os.Signal, 1)
+
 	testUrl := os.Args[1]
 	log.Printf("Starting to crawl at: %v", testUrl)
 
@@ -51,7 +58,11 @@ func main() {
 
 	linksChan <- &Link{TimeFound: time.Now(), DestUrl: testUrl}
 
-	for i := 1; i < 10; i++ {
+	// handle SIGTERM
+	go handleSigTerm(sigChan, db)
+	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT)
+
+	for i := 1; i < 2; i++ {
 		go handleNewPage(linksChan, db, rdb)
 	}
 
@@ -62,6 +73,19 @@ func main() {
 		check(err)
 		log.Printf("Visited %v links", visited)
 	}
+}
+
+func handleSigTerm(sig chan os.Signal, db *bun.DB) {
+	received := <-sig
+	log.Printf("Received signal %v", received)
+
+	log.Printf("Locking database in order to close it")
+	lockDb.Lock()
+	log.Printf("Database locked")
+	db.Close()
+	log.Printf("Database closed")
+
+	os.Exit(0)
 }
 
 func check(err error) {
