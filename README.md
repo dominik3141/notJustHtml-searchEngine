@@ -2,6 +2,7 @@
 
 ## To do
 * Move as many variables to the stack as possible to solve the memory problem
+* Reuse goroutines instead of spawning new ones
 * Use references for the link relations instead of using the whole link
 * Make some smart decisions about which links to follow first (i.e. follow links to different sites first)
 

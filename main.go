@@ -41,36 +41,45 @@ type Errors struct {
 }
 
 const createNewDb = true
+const maxFilesize = 1e8
 
 var lockDb sync.Mutex
 
 func main() {
+	// create a channel to receive certain syscalls
 	sigChan := make(chan os.Signal, 1)
 
 	// parse command line arguments
-	dbPath := flag.String("dbPath", "testDb007.sqlite", "Path to the database")
+	dbPath := flag.String("dbPath", "testDbxxx.sqlite", "Path to the database")
 	startUrl := flag.String("url", "", "Url to start crawling at")
 	numOfRoutines := flag.Int("n", 3, "Number of crawlers to run in parralel")
 	flag.Parse()
 
-	log.Printf("Starting to crawl at: %v", *startUrl)
-
+	// get database clients
 	rdb := getRedisClient()
 	defer rdb.Close()
 	db := getDb(*dbPath)
 	defer db.Close()
-	linksChan := make(chan *Link, 1e4)
 
+	// create channels
+	linksChan := make(chan *Link, 1e2)
+	urlToCrawlChan := make(chan *Link, 1e2)
+
+	// send startUrl to channel
 	linksChan <- &Link{TimeFound: time.Now(), DestUrl: *startUrl}
 
 	// handle SIGTERM
 	go handleSigTerm(sigChan, db)
 	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT)
 
+	// start goroutines
 	for i := 1; i <= *numOfRoutines; i++ {
-		go handleNewPage(linksChan, db, rdb)
+		go handleNewPage(urlToCrawlChan, linksChan, db, rdb)
+		go extractFromPage(urlToCrawlChan, db, linksChan)
 	}
 
+	// print a staus update every two seconds
+	log.Printf("Starting to crawl at: %v", *startUrl)
 	for {
 		time.Sleep(2 * time.Second)
 
