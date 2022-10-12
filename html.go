@@ -42,14 +42,16 @@ func addToQueue(queueIn chan *url.URL, rdb *redis.Client) {
 			continue
 		}
 
+		sitesIndexed++
+
 		// decide to which queue the link should be added
 		if !knownDomains[url.Hostname()] {
 			err = rdb.SAdd("highPrioQueue", url.String()).Err()
-			check(err)
+			checkRedisErr(err)
 			knownDomains[url.Hostname()] = true
 		} else {
 			err = rdb.SAdd("normalPrioQueue", url.String()).Err()
-			check(err)
+			checkRedisErr(err)
 		}
 
 		filter.Add([]byte(url.String()))
@@ -62,7 +64,11 @@ func extractFromPage(outChan chan<- *Link, db *bun.DB, rdb *redis.Client, queueN
 
 	for {
 		rawUrl, err := rdb.SPop(queueName).Result()
-		check(err)
+		checkRedisErr(err)
+		if rawUrl == "" {
+			time.Sleep(time.Second)
+			continue
+		}
 
 		// parse the url that we want to index
 		url, err := url.Parse(rawUrl)
@@ -136,7 +142,7 @@ func extractFromPage(outChan chan<- *Link, db *bun.DB, rdb *redis.Client, queueN
 
 		// check if content type is html, otherwise the file can not be searched for links
 		if contentType[:9] != "text/html" {
-			log.Printf("URL: %v. Content type is %v", url.String(), contentType)
+			// log.Printf("URL: %v. Content type is %v", url.String(), contentType)
 			continue
 		}
 

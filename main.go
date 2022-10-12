@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/go-redis/redis"
 	"github.com/uptrace/bun"
 )
 
@@ -55,6 +56,7 @@ const (
 )
 
 var lockDb sync.Mutex
+var sitesIndexed int
 
 func main() {
 	// create a channel to receive certain syscalls
@@ -100,9 +102,7 @@ func main() {
 	for {
 		time.Sleep(2 * time.Second)
 
-		visited, err := rdb.SCard("visitedLinks").Result()
-		check(err)
-		log.Printf("Visited %v links", visited)
+		log.Printf("Visited %v links", sitesIndexed)
 	}
 }
 
@@ -127,6 +127,12 @@ func check(err error) {
 
 func handleSqliteErr(err error) {
 	if err != nil {
+		panic(err)
+	}
+}
+
+func checkRedisErr(err error) {
+	if err != redis.Nil && err != nil {
 		panic(err)
 	}
 }
