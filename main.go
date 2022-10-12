@@ -16,22 +16,34 @@ import (
 )
 
 type Link struct {
-	ID              int64 `bun:",pk,autoincrement"`
 	TimeFound       time.Time
 	OrigUrl         *url.URL
 	DestUrl         *url.URL
 	SurroundingNode []byte
 }
 
-type NewUrl struct {
-	OrigUrl string
-	DestUrl string
+type LinkRel struct {
+	ID          int64 `bun:",pk,autoincrement"`
+	TimeFound   int64
+	Origin      int64
+	Destination int64
+}
+
+// type LinkText struct {
+// 	ID              int64 `bun:",pk,autoincrement"`
+// 	LinkID          int64
+// 	SurroundingNode []byte
+// }
+
+type Site struct {
+	ID  int64 `bun:",pk,autoincrement"`
+	Url string
 }
 
 type Content struct {
 	ID             int64 `bun:",pk,autoincrement"`
 	TimeFound      time.Time
-	Url            *url.URL
+	Url            string
 	ContentType    string
 	HttpStatusCode int
 	Size           int
@@ -57,6 +69,8 @@ const (
 
 var lockDb sync.Mutex
 var sitesIndexed int
+var db *bun.DB
+var rdb *redis.Client
 
 func main() {
 	// create a channel to receive certain syscalls
@@ -69,9 +83,9 @@ func main() {
 	flag.Parse()
 
 	// get database clients
-	rdb := getRedisClient()
+	rdb = getRedisClient()
 	defer rdb.Close()
-	db := getDb(*dbPath)
+	db = getDb(*dbPath)
 	defer db.Close()
 
 	// create channels
@@ -79,7 +93,7 @@ func main() {
 	newUrls := make(chan *url.URL, 1e2) // saveNewLink -> handleQueue
 
 	// start queueWorker
-	go addToQueue(newUrls, rdb)
+	go addToQueue(newUrls)
 
 	// send startUrl to channel
 	startUrl, err := url.Parse(*rawStartUrl)
@@ -87,14 +101,14 @@ func main() {
 	newUrls <- startUrl
 
 	// handle SIGTERM
-	go handleSigTerm(sigChan, db)
+	go handleSigTerm(sigChan)
 	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT)
 
-	go extractFromPage(linksChan, db, rdb, "highPrioQueue")
+	go extractFromPage(linksChan, "highPrioQueue")
 	// start goroutines
 	for i := 1; i <= *numOfRoutines; i++ {
-		go saveNewLink(linksChan, newUrls, db, rdb)
-		go extractFromPage(linksChan, db, rdb, "normalPrioQueue")
+		go saveNewLink(linksChan, newUrls)
+		go extractFromPage(linksChan, "normalPrioQueue")
 	}
 
 	// print a staus update every two seconds
@@ -106,7 +120,7 @@ func main() {
 	}
 }
 
-func handleSigTerm(sig chan os.Signal, db *bun.DB) {
+func handleSigTerm(sig chan os.Signal) {
 	received := <-sig
 	log.Printf("Received signal %v", received)
 

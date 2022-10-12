@@ -40,11 +40,13 @@ func getDb(dbPath string) *bun.DB {
 
 	// create new tables
 	if createNewDb {
-		_, err = db.NewCreateTable().Model(&Link{}).Exec(context.Background())
+		_, err = db.NewCreateTable().Model(&LinkRel{}).Exec(context.Background())
 		check(err)
 		_, err = db.NewCreateTable().Model(&Errors{}).Exec(context.Background())
 		check(err)
 		_, err = db.NewCreateTable().Model(&Content{}).Exec(context.Background())
+		check(err)
+		_, err = db.NewCreateTable().Model(&Site{}).Exec(context.Background())
 		check(err)
 	}
 

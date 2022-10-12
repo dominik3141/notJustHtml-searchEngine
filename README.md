@@ -2,6 +2,7 @@
 
 ## To do
 * Use references for the link relations instead of using the whole link
+* Save date as unix timestamp
 
 ## Low priority
 

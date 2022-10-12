@@ -11,18 +11,53 @@ import (
 	"time"
 
 	"github.com/bits-and-blooms/bloom/v3"
-	"github.com/go-redis/redis"
-	"github.com/uptrace/bun"
 	"golang.org/x/net/html"
 )
 
-func saveNewLink(inChan <-chan *Link, outChan chan<- *url.URL, db *bun.DB, rdb *redis.Client) {
+// func getSite(url string) *Site {
+func getSite(url string) int64 {
+	site := new(Site)
+	var i int
+start:
+
+	id, err := rdb.HGet("SiteIDs", url).Result()
+	checkRedisErr(err)
+	if id == "" {
+		lockDb.Lock()
+		err = db.NewSelect().Model(site).Where("url = ?", url).Scan(context.Background(), site)
+		lockDb.Unlock()
+		if err != nil || site.ID == 0 {
+			// create new site
+			lockDb.Lock()
+			_, err := db.NewInsert().Model(&Site{Url: url}).Exec(context.Background())
+			handleSqliteErr(err)
+			lockDb.Unlock()
+			if i > 3 {
+				panic("loop")
+			}
+			i++
+			goto start
+		}
+		err = rdb.HSet("SiteIDs", url, site.ID).Err()
+		checkRedisErr(err)
+	}
+
+	return site.ID
+}
+
+func saveNewLink(inChan <-chan *Link, outChan chan<- *url.URL) {
 	for {
 		link := <-inChan
 
+		linkRel := &LinkRel{
+			TimeFound:   link.TimeFound.UnixMicro(),
+			Origin:      getSite(link.OrigUrl.String()),
+			Destination: getSite(link.DestUrl.String()),
+		}
+
 		// add link to database
 		lockDb.Lock()
-		_, err := db.NewInsert().Model(link).Exec(context.Background())
+		_, err := db.NewInsert().Model(linkRel).Exec(context.Background())
 		handleSqliteErr(err)
 		lockDb.Unlock()
 
@@ -30,7 +65,7 @@ func saveNewLink(inChan <-chan *Link, outChan chan<- *url.URL, db *bun.DB, rdb *
 	}
 }
 
-func addToQueue(queueIn chan *url.URL, rdb *redis.Client) {
+func addToQueue(queueIn chan *url.URL) {
 	knownDomains := make(map[string]bool)
 	filter := bloom.NewWithEstimates(maxNumOfUrls, 0.01)
 	var err error
@@ -58,7 +93,7 @@ func addToQueue(queueIn chan *url.URL, rdb *redis.Client) {
 	}
 }
 
-func extractFromPage(outChan chan<- *Link, db *bun.DB, rdb *redis.Client, queueName string) {
+func extractFromPage(outChan chan<- *Link, queueName string) {
 	bodyContainer := make([]byte, maxFilesize)
 	var body []byte
 
@@ -134,7 +169,7 @@ func extractFromPage(outChan chan<- *Link, db *bun.DB, rdb *redis.Client, queueN
 		} else {
 			contentType = http.DetectContentType(body)
 		}
-		content := Content{TimeFound: time.Now(), Url: url, ContentType: contentType, Hash: &hash, Size: n, HttpStatusCode: resp.StatusCode}
+		content := Content{TimeFound: time.Now(), Url: url.String(), ContentType: contentType, Hash: &hash, Size: n, HttpStatusCode: resp.StatusCode}
 		lockDb.Lock()
 		_, err = db.NewInsert().Model(&content).Exec(context.Background())
 		handleSqliteErr(err)
