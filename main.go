@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/sha512"
+	"flag"
 	"log"
 	"os"
 	"os/signal"
@@ -17,7 +18,6 @@ type Link struct {
 	TimeFound       time.Time
 	OrigUrl         string
 	DestUrl         string
-	LinkText        string
 	SurroundingNode []byte
 }
 
@@ -27,7 +27,7 @@ type Content struct {
 	Url         string
 	ContentType string
 	Size        int
-	Hash        [sha512.Size]byte
+	Hash        *[sha512.Size]byte
 }
 
 type Errors struct {
@@ -47,22 +47,27 @@ var lockDb sync.Mutex
 func main() {
 	sigChan := make(chan os.Signal, 1)
 
-	testUrl := os.Args[1]
-	log.Printf("Starting to crawl at: %v", testUrl)
+	// parse command line arguments
+	dbPath := flag.String("dbPath", "testDb007.sqlite", "Path to the database")
+	startUrl := flag.String("url", "", "Url to start crawling at")
+	numOfRoutines := flag.Int("n", 3, "Number of crawlers to run in parralel")
+	flag.Parse()
+
+	log.Printf("Starting to crawl at: %v", *startUrl)
 
 	rdb := getRedisClient()
 	defer rdb.Close()
-	db := getDb("testDb006.sqlite")
+	db := getDb(*dbPath)
 	defer db.Close()
 	linksChan := make(chan *Link, 1e4)
 
-	linksChan <- &Link{TimeFound: time.Now(), DestUrl: testUrl}
+	linksChan <- &Link{TimeFound: time.Now(), DestUrl: *startUrl}
 
 	// handle SIGTERM
 	go handleSigTerm(sigChan, db)
 	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT)
 
-	for i := 1; i < 4; i++ {
+	for i := 1; i <= *numOfRoutines; i++ {
 		go handleNewPage(linksChan, db, rdb)
 	}
 

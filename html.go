@@ -88,7 +88,8 @@ func extractFromPage(originUrl string, link *Link, db *bun.DB, linksChan chan<- 
 	check(err)
 
 	// Retrieve content information
-	content := Content{TimeFound: time.Now(), Url: url.String(), ContentType: http.DetectContentType(body[:512]), Hash: sha512.Sum512(body), Size: len(body)}
+	hash := sha512.Sum512(body)
+	content := Content{TimeFound: time.Now(), Url: url.String(), ContentType: http.DetectContentType(body[:512]), Hash: &hash, Size: len(body)}
 	lockDb.Lock()
 	_, err = db.NewInsert().Model(&content).Exec(context.Background())
 	handleSqliteErr(err)
@@ -109,35 +110,43 @@ func extractFromPage(originUrl string, link *Link, db *bun.DB, linksChan chan<- 
 }
 
 type ReducedHtmlNode struct {
-	Type      html.NodeType
-	Data      string
-	Namespace string
-	Attr      []html.Attribute
-	Parent    *ReducedHtmlNode
+	Type html.NodeType
+	Data string
+	// Namespace string
+	Attr   []html.Attribute
+	Childs []*ReducedHtmlNode
+}
+
+func reduce(node *html.Node) *ReducedHtmlNode {
+	return &ReducedHtmlNode{
+		Type: node.Type,
+		Attr: node.Attr,
+		Data: node.Data,
+	}
+}
+
+func getChilds(node *html.Node) []*ReducedHtmlNode {
+	childs := make([]*ReducedHtmlNode, 0)
+
+	for c := node.FirstChild; c != nil; c = c.NextSibling {
+		rChild := reduce(c)
+		rChild.Childs = getChilds(c)
+		childs = append(childs, rChild)
+	}
+
+	return childs
 }
 
 func reduceHtmlNode(node *html.Node) *ReducedHtmlNode {
-	const depth = 3
+	const depth = 0
 
-	var prevNode *ReducedHtmlNode
-	rootNode := new(ReducedHtmlNode)
-	rootNode.Attr = node.Attr
-	rootNode.Data = node.Data
-	rootNode.Namespace = node.Namespace
-	prevNode = rootNode
-
-	for i := 0; i <= depth && node.Parent != nil; i++ {
+	for i := 1; i <= depth && node.Parent != nil; i++ {
 		node = node.Parent
-		rNode := new(ReducedHtmlNode)
-		rNode.Attr = node.Attr
-		rNode.Data = node.Data
-		rNode.Namespace = node.Namespace
-
-		prevNode.Parent = rNode
-		prevNode = rNode
 	}
 
-	return rootNode
+	ret := reduce(node)
+	ret.Childs = getChilds(node)
+	return ret
 }
 
 // gets all links starting at a given html node
@@ -166,7 +175,6 @@ func getAllLinks(originUrl *url.URL, node *html.Node, links chan<- *Link) {
 					TimeFound:       time.Now(),
 					OrigUrl:         originUrl.String(),
 					DestUrl:         linkDst.String(),
-					LinkText:        c.Data,
 					SurroundingNode: jsonNode,
 				}
 
