@@ -14,15 +14,16 @@ import (
 	"golang.org/x/net/html"
 )
 
-// func getSite(url string) *Site {
-func getSite(url string) int64 {
+// func getID(url string) *Site {
+func getID(url string) int64 {
 	site := new(Site)
 	var i int
 start:
 
-	id, err := rdb.HGet("SiteIDs", url).Result()
+	id, err := rdb.HGet("SiteIDs", url).Int64()
 	checkRedisErr(err)
-	if id == "" {
+	site.ID = id
+	if id == 0 {
 		lockDb.Lock()
 		err = db.NewSelect().Model(site).Where("url = ?", url).Scan(context.Background(), site)
 		lockDb.Unlock()
@@ -51,8 +52,8 @@ func saveNewLink(inChan <-chan *Link, outChan chan<- *url.URL) {
 
 		linkRel := &LinkRel{
 			TimeFound:   link.TimeFound.UnixMicro(),
-			Origin:      getSite(link.OrigUrl.String()),
-			Destination: getSite(link.DestUrl.String()),
+			Origin:      getID(link.OrigUrl.String()),
+			Destination: getID(link.DestUrl.String()),
 		}
 
 		// add link to database
@@ -169,7 +170,7 @@ func extractFromPage(outChan chan<- *Link, queueName string) {
 		} else {
 			contentType = http.DetectContentType(body)
 		}
-		content := Content{TimeFound: time.Now(), Url: url.String(), ContentType: contentType, Hash: &hash, Size: n, HttpStatusCode: resp.StatusCode}
+		content := Content{TimeFound: time.Now().UnixMicro(), SiteID: getID(url.String()), ContentType: contentType, Hash: &hash, Size: n, HttpStatusCode: resp.StatusCode}
 		lockDb.Lock()
 		_, err = db.NewInsert().Model(&content).Exec(context.Background())
 		handleSqliteErr(err)

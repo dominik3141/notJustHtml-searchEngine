@@ -42,8 +42,8 @@ type Site struct {
 
 type Content struct {
 	ID             int64 `bun:",pk,autoincrement"`
-	TimeFound      time.Time
-	Url            string
+	TimeFound      int64
+	SiteID         int64
 	ContentType    string
 	HttpStatusCode int
 	Size           int
