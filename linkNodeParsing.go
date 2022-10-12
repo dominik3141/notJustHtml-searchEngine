@@ -72,8 +72,8 @@ func getAllLinks(originUrl *url.URL, node *html.Node, links chan<- *Link) {
 
 				link := Link{
 					TimeFound:       time.Now(),
-					OrigUrl:         originUrl.String(),
-					DestUrl:         linkDst.String(),
+					OrigUrl:         originUrl,
+					DestUrl:         linkDst,
 					SurroundingNode: jsonNode,
 				}
 

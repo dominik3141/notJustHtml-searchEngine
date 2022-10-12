@@ -4,6 +4,7 @@ import (
 	"crypto/sha512"
 	"flag"
 	"log"
+	"net/url"
 	"os"
 	"os/signal"
 	"sync"
@@ -16,15 +17,20 @@ import (
 type Link struct {
 	ID              int64 `bun:",pk,autoincrement"`
 	TimeFound       time.Time
-	OrigUrl         string
-	DestUrl         string
+	OrigUrl         *url.URL
+	DestUrl         *url.URL
 	SurroundingNode []byte
+}
+
+type NewUrl struct {
+	OrigUrl string
+	DestUrl string
 }
 
 type Content struct {
 	ID             int64 `bun:",pk,autoincrement"`
 	TimeFound      time.Time
-	Url            string
+	Url            *url.URL
 	ContentType    string
 	HttpStatusCode int
 	Size           int
@@ -42,8 +48,11 @@ type Errors struct {
 	HttpStatusCode          int
 }
 
-const createNewDb = true
-const maxFilesize = 2e7
+const (
+	createNewDb  = true
+	maxFilesize  = 2e7
+	maxNumOfUrls = 1e7 // an estimate of how many urls we want to index
+)
 
 var lockDb sync.Mutex
 
@@ -53,7 +62,7 @@ func main() {
 
 	// parse command line arguments
 	dbPath := flag.String("dbPath", "testDbxxx.sqlite", "Path to the database")
-	startUrl := flag.String("url", "", "Url to start crawling at")
+	rawStartUrl := flag.String("url", "", "Url to start crawling at")
 	numOfRoutines := flag.Int("n", 3, "Number of crawlers to run in parralel")
 	flag.Parse()
 
@@ -64,24 +73,30 @@ func main() {
 	defer db.Close()
 
 	// create channels
-	linksChan := make(chan *Link, 1e4)
-	urlToCrawlChan := make(chan *Link, 1e4)
+	linksChan := make(chan *Link, 1e2)  // extractFromPage -> saveNewLink
+	newUrls := make(chan *url.URL, 1e2) // saveNewLink -> handleQueue
+
+	// start queueWorker
+	go addToQueue(newUrls, rdb)
 
 	// send startUrl to channel
-	linksChan <- &Link{TimeFound: time.Now(), DestUrl: *startUrl}
+	startUrl, err := url.Parse(*rawStartUrl)
+	check(err)
+	newUrls <- startUrl
 
 	// handle SIGTERM
 	go handleSigTerm(sigChan, db)
 	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT)
 
+	go extractFromPage(linksChan, db, rdb, "highPrioQueue")
 	// start goroutines
 	for i := 1; i <= *numOfRoutines; i++ {
-		go handleNewPage(urlToCrawlChan, linksChan, db, rdb)
-		go extractFromPage(urlToCrawlChan, db, linksChan)
+		go saveNewLink(linksChan, newUrls, db, rdb)
+		go extractFromPage(linksChan, db, rdb, "normalPrioQueue")
 	}
 
 	// print a staus update every two seconds
-	log.Printf("Starting to crawl at: %v", *startUrl)
+	log.Printf("Starting to crawl at: %v", *rawStartUrl)
 	for {
 		time.Sleep(2 * time.Second)
 

@@ -10,16 +10,15 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/bits-and-blooms/bloom/v3"
 	"github.com/go-redis/redis"
 	"github.com/uptrace/bun"
 	"golang.org/x/net/html"
 )
 
-func handleNewPage(urlToCrawlChan chan<- *Link, linksChan <-chan *Link, db *bun.DB, rdb *redis.Client) {
-	log.Println("Started goroutine.")
-
+func saveNewLink(inChan <-chan *Link, outChan chan<- *url.URL, db *bun.DB, rdb *redis.Client) {
 	for {
-		link := <-linksChan
+		link := <-inChan
 
 		// add link to database
 		lockDb.Lock()
@@ -27,33 +26,48 @@ func handleNewPage(urlToCrawlChan chan<- *Link, linksChan <-chan *Link, db *bun.
 		handleSqliteErr(err)
 		lockDb.Unlock()
 
-		// query redis to make sure the url has not been indexed before
-		done, err := rdb.SIsMember("visitedLinks", link.DestUrl).Result()
-		check(err)
-		if done {
-			continue
-		}
-
-		// send a new url to the crawlers
-		urlToCrawlChan <- link
-
-		// set link to done in redis
-		err = rdb.SAdd("visitedLinks", link.DestUrl).Err()
-		check(err)
+		outChan <- link.DestUrl
 	}
 }
 
-func extractFromPage(urls <-chan *Link, db *bun.DB, linksChan chan<- *Link) {
+func addToQueue(queueIn chan *url.URL, rdb *redis.Client) {
+	knownDomains := make(map[string]bool)
+	filter := bloom.NewWithEstimates(maxNumOfUrls, 0.01)
+	var err error
+
+	for {
+		url := <-queueIn
+
+		if filter.Test([]byte(url.String())) {
+			continue
+		}
+
+		// decide to which queue the link should be added
+		if !knownDomains[url.Hostname()] {
+			err = rdb.SAdd("highPrioQueue", url.String()).Err()
+			check(err)
+			knownDomains[url.Hostname()] = true
+		} else {
+			err = rdb.SAdd("normalPrioQueue", url.String()).Err()
+			check(err)
+		}
+
+		filter.Add([]byte(url.String()))
+	}
+}
+
+func extractFromPage(outChan chan<- *Link, db *bun.DB, rdb *redis.Client, queueName string) {
 	bodyContainer := make([]byte, maxFilesize)
 	var body []byte
 
 	for {
-		link := <-urls
+		rawUrl, err := rdb.SPop(queueName).Result()
+		check(err)
 
 		// parse the url that we want to index
-		url, err := url.Parse(link.DestUrl)
+		url, err := url.Parse(rawUrl)
 		if err != nil {
-			log.Printf("URL: %v. Url parsing error. err=%v", link.DestUrl, err)
+			log.Printf("URL: %v. Url parsing error. err=%v", rawUrl, err)
 			continue
 		}
 
@@ -114,7 +128,7 @@ func extractFromPage(urls <-chan *Link, db *bun.DB, linksChan chan<- *Link) {
 		} else {
 			contentType = http.DetectContentType(body)
 		}
-		content := Content{TimeFound: time.Now(), Url: url.String(), ContentType: contentType, Hash: &hash, Size: n, HttpStatusCode: resp.StatusCode}
+		content := Content{TimeFound: time.Now(), Url: url, ContentType: contentType, Hash: &hash, Size: n, HttpStatusCode: resp.StatusCode}
 		lockDb.Lock()
 		_, err = db.NewInsert().Model(&content).Exec(context.Background())
 		handleSqliteErr(err)
@@ -122,7 +136,7 @@ func extractFromPage(urls <-chan *Link, db *bun.DB, linksChan chan<- *Link) {
 
 		// check if content type is html, otherwise the file can not be searched for links
 		if contentType[:9] != "text/html" {
-			log.Printf("URL: %v. Content type is %v", link.DestUrl, contentType)
+			log.Printf("URL: %v. Content type is %v", url.String(), contentType)
 			continue
 		}
 
@@ -139,6 +153,6 @@ func extractFromPage(urls <-chan *Link, db *bun.DB, linksChan chan<- *Link) {
 		}
 
 		// get all links that can be found on this site and add send them to the channel
-		getAllLinks(url, rootNode, linksChan)
+		getAllLinks(url, rootNode, outChan)
 	}
 }

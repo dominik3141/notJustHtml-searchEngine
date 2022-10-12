@@ -2,9 +2,13 @@ module main
 
 go 1.18
 
-require golang.org/x/net v0.0.0-20221004154528-8021a29435af
+require (
+	github.com/bits-and-blooms/bloom/v3 v3.3.1
+	golang.org/x/net v0.0.0-20221004154528-8021a29435af
+)
 
 require (
+	github.com/bits-and-blooms/bitset v1.3.3 // indirect
 	github.com/onsi/ginkgo v1.16.5 // indirect
 	github.com/onsi/gomega v1.21.1 // indirect
 )
