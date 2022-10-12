@@ -44,6 +44,9 @@ func handleNewPage(urlToCrawlChan chan<- *Link, linksChan <-chan *Link, db *bun.
 }
 
 func extractFromPage(urls <-chan *Link, db *bun.DB, linksChan chan<- *Link) {
+	bodyContainer := make([]byte, maxFilesize)
+	var body []byte
+
 	for {
 		link := <-urls
 
@@ -81,9 +84,9 @@ func extractFromPage(urls <-chan *Link, db *bun.DB, linksChan chan<- *Link) {
 		}
 
 		// read body
-		body, err := io.ReadAll(resp.Body)
-		if err != nil {
-			log.Printf("URL: %v. Error reading response body", url.String())
+		n, err := resp.Body.Read(bodyContainer)
+		if err != nil && err != io.EOF {
+			log.Printf("URL: %v. Error reading response body. err=%v", url.String(), err)
 			dbErr := Errors{Url: url.String(), Time: time.Now(), ErrorReading: true}
 			lockDb.Lock()
 			_, err = db.NewInsert().Model(&dbErr).Exec(context.Background())
@@ -91,20 +94,34 @@ func extractFromPage(urls <-chan *Link, db *bun.DB, linksChan chan<- *Link) {
 			lockDb.Unlock()
 			continue
 		}
+		if n != int(resp.ContentLength) && resp.ContentLength != -1 {
+			log.Printf("URL: %v. Length of response is different from the content length indicated in the response header. %v vs. %v", url.String(), n, resp.ContentLength)
+			dbErr := Errors{Url: url.String(), Time: time.Now(), ResponseSizeUneqContLen: true}
+			lockDb.Lock()
+			_, err = db.NewInsert().Model(&dbErr).Exec(context.Background())
+			handleSqliteErr(err)
+			lockDb.Unlock()
+		}
 		err = resp.Body.Close()
 		check(err)
+		body = bodyContainer[:n]
 
 		// Retrieve content information
 		hash := sha512.Sum512(body)
-		contentType := http.DetectContentType(body[:512])
-		content := Content{TimeFound: time.Now(), Url: url.String(), ContentType: contentType, Hash: &hash, Size: len(body)}
+		var contentType string
+		if n >= 512 {
+			contentType = http.DetectContentType(body[:512])
+		} else {
+			contentType = http.DetectContentType(body)
+		}
+		content := Content{TimeFound: time.Now(), Url: url.String(), ContentType: contentType, Hash: &hash, Size: n, HttpStatusCode: resp.StatusCode}
 		lockDb.Lock()
 		_, err = db.NewInsert().Model(&content).Exec(context.Background())
 		handleSqliteErr(err)
 		lockDb.Unlock()
 
 		// check if content type is html, otherwise the file can not be searched for links
-		if contentType[:8] != "text/html" {
+		if contentType[:9] != "text/html" {
 			log.Printf("URL: %v. Content type is %v", link.DestUrl, contentType)
 			continue
 		}

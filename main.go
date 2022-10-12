@@ -22,26 +22,28 @@ type Link struct {
 }
 
 type Content struct {
-	ID          int64 `bun:",pk,autoincrement"`
-	TimeFound   time.Time
-	Url         string
-	ContentType string
-	Size        int
-	Hash        *[sha512.Size]byte
+	ID             int64 `bun:",pk,autoincrement"`
+	TimeFound      time.Time
+	Url            string
+	ContentType    string
+	HttpStatusCode int
+	Size           int
+	Hash           *[sha512.Size]byte
 }
 
 type Errors struct {
-	ID             int64 `bun:",pk,autoincrement"`
-	Time           time.Time
-	Url            string
-	ParsingError   bool
-	ResponseToBig  bool
-	ErrorReading   bool
-	HttpStatusCode int
+	ID                      int64 `bun:",pk,autoincrement"`
+	Time                    time.Time
+	Url                     string
+	ParsingError            bool
+	ResponseToBig           bool
+	ErrorReading            bool
+	ResponseSizeUneqContLen bool
+	HttpStatusCode          int
 }
 
 const createNewDb = true
-const maxFilesize = 1e8
+const maxFilesize = 2e7
 
 var lockDb sync.Mutex
 
@@ -62,8 +64,8 @@ func main() {
 	defer db.Close()
 
 	// create channels
-	linksChan := make(chan *Link, 1e2)
-	urlToCrawlChan := make(chan *Link, 1e2)
+	linksChan := make(chan *Link, 1e4)
+	urlToCrawlChan := make(chan *Link, 1e4)
 
 	// send startUrl to channel
 	linksChan <- &Link{TimeFound: time.Now(), DestUrl: *startUrl}
