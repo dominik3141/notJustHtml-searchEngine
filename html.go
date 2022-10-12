@@ -47,12 +47,14 @@ func extractFromPage(urls <-chan *Link, db *bun.DB, linksChan chan<- *Link) {
 	for {
 		link := <-urls
 
+		// parse the url that we want to index
 		url, err := url.Parse(link.DestUrl)
 		if err != nil {
 			log.Printf("URL: %v. Url parsing error. err=%v", link.DestUrl, err)
-			return
+			continue
 		}
 
+		// GET the url
 		resp, err := http.Get(url.String())
 		if err != nil {
 			log.Printf("URL: %v. html get error. err=%v", url.String(), err)
@@ -64,9 +66,10 @@ func extractFromPage(urls <-chan *Link, db *bun.DB, linksChan chan<- *Link) {
 			_, err = db.NewInsert().Model(&dbErr).Exec(context.Background())
 			handleSqliteErr(err)
 			lockDb.Unlock()
-			return
+			continue
 		}
 
+		// check if response body is to large for use to handle
 		if resp.ContentLength >= maxFilesize {
 			log.Printf("URL: %v. Webpage is to big.", url.String())
 			dbErr := Errors{Url: url.String(), Time: time.Now(), ResponseToBig: true}
@@ -74,7 +77,7 @@ func extractFromPage(urls <-chan *Link, db *bun.DB, linksChan chan<- *Link) {
 			_, err = db.NewInsert().Model(&dbErr).Exec(context.Background())
 			handleSqliteErr(err)
 			lockDb.Unlock()
-			return
+			continue
 		}
 
 		// read body
@@ -86,19 +89,27 @@ func extractFromPage(urls <-chan *Link, db *bun.DB, linksChan chan<- *Link) {
 			_, err = db.NewInsert().Model(&dbErr).Exec(context.Background())
 			handleSqliteErr(err)
 			lockDb.Unlock()
-			return
+			continue
 		}
 		err = resp.Body.Close()
 		check(err)
 
 		// Retrieve content information
 		hash := sha512.Sum512(body)
-		content := Content{TimeFound: time.Now(), Url: url.String(), ContentType: http.DetectContentType(body[:512]), Hash: &hash, Size: len(body)}
+		contentType := http.DetectContentType(body[:512])
+		content := Content{TimeFound: time.Now(), Url: url.String(), ContentType: contentType, Hash: &hash, Size: len(body)}
 		lockDb.Lock()
 		_, err = db.NewInsert().Model(&content).Exec(context.Background())
 		handleSqliteErr(err)
 		lockDb.Unlock()
 
+		// check if content type is html, otherwise the file can not be searched for links
+		if contentType[:8] != "text/html" {
+			log.Printf("URL: %v. Content type is %v", link.DestUrl, contentType)
+			continue
+		}
+
+		// parse html
 		rootNode, err := html.Parse(bytes.NewReader(body))
 		if err != nil {
 			log.Printf("URL: %v. html parsing error. err=%v", url, err)
@@ -107,9 +118,10 @@ func extractFromPage(urls <-chan *Link, db *bun.DB, linksChan chan<- *Link) {
 			_, err = db.NewInsert().Model(&dbErr).Exec(context.Background())
 			handleSqliteErr(err)
 			lockDb.Unlock()
-			return
+			continue
 		}
 
+		// get all links that can be found on this site and add send them to the channel
 		getAllLinks(url, rootNode, linksChan)
 	}
 }
