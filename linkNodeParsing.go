@@ -1,10 +1,10 @@
 package main
 
 import (
-	"encoding/json"
 	"net/url"
 	"time"
 
+	"github.com/icza/gox/stringsx"
 	"golang.org/x/net/html"
 )
 
@@ -67,14 +67,16 @@ func getAllLinks(originUrl *url.URL, node *html.Node, links chan<- *Link) {
 				}
 
 				// jsonNode, err := json.MarshalIndent(reduceHtmlNode(c), "", "\t")
-				jsonNode, err := json.Marshal(reduceHtmlNode(c))
-				check(err)
+				reducedNode := reduceHtmlNode(c)
+				// jsonNode, err := json.Marshal(reducedNode)
+				// check(err)
 
 				link := Link{
-					TimeFound:       time.Now(),
-					OrigUrl:         originUrl,
-					DestUrl:         linkDst,
-					SurroundingNode: jsonNode,
+					TimeFound: time.Now(),
+					OrigUrl:   originUrl,
+					DestUrl:   linkDst,
+					// SurroundingNode: jsonNode,
+					Keywords: extractKeywords(reducedNode, 10),
 				}
 
 				links <- &link
@@ -88,6 +90,42 @@ func getAllLinks(originUrl *url.URL, node *html.Node, links chan<- *Link) {
 			getAllLinks(originUrl, c.FirstChild, links)
 		}
 	}
+}
+
+func extractKeywords(rNode *ReducedHtmlNode, multiplier int) []HtmlText {
+	keywords := make([]HtmlText, 0)
+
+	switch rNode.Data {
+	case "h1":
+		multiplier = 1
+	case "h2":
+		multiplier = 2
+	case "h3":
+		multiplier = 3
+	case "h4":
+		multiplier = 4
+	case "h5":
+		multiplier = 5
+	case "h6":
+		multiplier = 6
+	case "h7":
+		multiplier = 7
+	}
+
+	if rNode.Type == html.TextNode && rNode.Data != "" {
+		word := HtmlText{
+			Text:       stringsx.Clean(rNode.Data),
+			Visibility: multiplier,
+		}
+		keywords = append(keywords, word)
+	}
+
+	for i := range rNode.Childs {
+		newKeywords := extractKeywords(rNode.Childs[i], multiplier)
+		keywords = append(keywords, newKeywords...)
+	}
+
+	return keywords
 }
 
 // search the child nodes of a html link node for a text node

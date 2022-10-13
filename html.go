@@ -4,13 +4,13 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha512"
+	"encoding/base64"
 	"io"
 	"log"
 	"net/http"
 	"net/url"
 	"time"
 
-	"github.com/bits-and-blooms/bloom/v3"
 	"golang.org/x/net/html"
 )
 
@@ -22,6 +22,7 @@ func saveNewLink(inChan <-chan *Link, outChan chan<- *url.URL) {
 			TimeFound:   link.TimeFound.UnixMicro(),
 			Origin:      getSiteID(link.OrigUrl.String()),
 			Destination: getSiteID(link.DestUrl.String()),
+			Keywords:    link.Keywords,
 		}
 
 		// add link to database
@@ -31,35 +32,6 @@ func saveNewLink(inChan <-chan *Link, outChan chan<- *url.URL) {
 		lockDb.Unlock()
 
 		outChan <- link.DestUrl
-	}
-}
-
-func addToQueue(queueIn chan *url.URL) {
-	knownDomains := make(map[string]bool)
-	filter := bloom.NewWithEstimates(maxNumOfUrls, 0.01)
-	var err error
-
-	for {
-		url := <-queueIn
-
-		if filter.Test([]byte(url.String())) {
-			continue
-		}
-
-		sitesIndexed++
-
-		// decide to which queue the link should be added
-		if !knownDomains[url.Hostname()] {
-			err = rdb.SAdd("highPrioQueue", url.String()).Err()
-			checkRedisErr(err)
-			knownDomains[url.Hostname()] = true
-			log.Printf("Found new site: %v. Known sites:%v,", url.Hostname(), len(knownDomains))
-		} else {
-			err = rdb.SAdd("normalPrioQueue", url.String()).Err()
-			checkRedisErr(err)
-		}
-
-		filter.Add([]byte(url.String()))
 	}
 }
 
@@ -139,14 +111,50 @@ func extractFromPage(outChan chan<- *Link, queueName string) {
 		} else {
 			contentTypeStr = http.DetectContentType(body)
 		}
-		content := Content{TimeFound: time.Now().UnixMicro(), SiteID: getSiteID(url.String()), ContentType: getContentTypeId(contentTypeStr), Hash: &hash, Size: n, HttpStatusCode: resp.StatusCode}
+
+		hashBase64 := base64.StdEncoding.EncodeToString(hash[:])
+		switch contentTypeStr {
+		case "text/html":
+		case "text/javascript":
+		case "image/png":
+			saveToFile(hashBase64+".png", &body)
+		case "image/jpeg":
+			saveToFile(hashBase64+".jpg", &body)
+		case "application/x-gzip":
+			saveToFile(hashBase64+".gz", &body)
+		case "text/plain":
+			saveToFile(hashBase64+".txt", &body)
+		case "application/java-archive":
+			saveToFile(hashBase64+".jar", &body)
+		case "text/csv":
+			saveToFile(hashBase64+".csv", &body)
+		case "application/json":
+			saveToFile(hashBase64+".json", &body)
+		case "application/zip":
+			saveToFile(hashBase64+".zip", &body)
+		case "application/pdf":
+			saveToFile(hashBase64+".pdf", &body)
+		case "video/mp4":
+			saveToFile(hashBase64+".mp4", &body)
+		case "application/oxtet-stream":
+			saveToFile(hashBase64+".bin", &body)
+		case "application/vnd.android.package-archive":
+			saveToFile(hashBase64+".apk", &body)
+		case " application/x-msdownload":
+			saveToFile(hashBase64+".exe", &body)
+		case " application/word":
+			saveToFile(hashBase64+".doc", &body)
+		case " application/excel":
+			saveToFile(hashBase64+".xl", &body)
+		}
+		content := Content{TimeFound: time.Now().UnixMicro(), SiteID: getSiteID(url.String()), ContentTypeId: getContentTypeId(contentTypeStr), Hash: &hash, Size: n, HttpStatusCode: resp.StatusCode}
 		lockDb.Lock()
 		_, err = db.NewInsert().Model(&content).Exec(context.Background())
 		handleSqliteErr(err)
 		lockDb.Unlock()
 
 		// check if content type is html, otherwise the file can not be searched for links
-		if contentTypeStr[:9] != "text/html" {
+		if len(contentTypeStr) >= 8 && contentTypeStr[:9] != "text/html" {
 			// log.Printf("URL: %v. Content type is %v", url.String(), contentType)
 			continue
 		}

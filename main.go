@@ -15,11 +15,17 @@ import (
 	"github.com/uptrace/bun"
 )
 
+type HtmlText struct {
+	Visibility int
+	Text       string
+}
+
 type Link struct {
 	TimeFound       time.Time
 	OrigUrl         *url.URL
 	DestUrl         *url.URL
 	SurroundingNode []byte
+	Keywords        []HtmlText
 }
 
 type LinkRel struct {
@@ -27,13 +33,8 @@ type LinkRel struct {
 	TimeFound   int64
 	Origin      int64
 	Destination int64
+	Keywords    []HtmlText
 }
-
-// type LinkText struct {
-// 	ID              int64 `bun:",pk,autoincrement"`
-// 	LinkID          int64
-// 	SurroundingNode []byte
-// }
 
 type Site struct {
 	ID  int64 `bun:",pk,autoincrement"`
@@ -44,7 +45,7 @@ type Content struct {
 	ID             int64 `bun:",pk,autoincrement"`
 	TimeFound      int64
 	SiteID         int64
-	ContentType    int64
+	ContentTypeId  int64
 	HttpStatusCode int
 	Size           int
 	Hash           *[sha512.Size]byte
@@ -64,7 +65,7 @@ type Errors struct {
 const (
 	createNewDb  = true
 	maxFilesize  = 2e7
-	maxNumOfUrls = 1e8 // an estimate of how many urls we want to index
+	maxNumOfUrls = 1e7 // an estimate of how many urls we want to index
 )
 
 var lockDb sync.Mutex
@@ -96,20 +97,21 @@ func main() {
 	// start queueWorker
 	go addToQueue(newUrls)
 
-	// send startUrl to channel
-	startUrl, err := url.Parse(*rawStartUrl)
-	check(err)
-	newUrls <- startUrl
+	// add to startSites
+	addStartSites(newUrls)
 
 	// handle SIGTERM
 	go handleSigTerm(sigChan)
 	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT)
 
-	go extractFromPage(linksChan, "highPrioQueue")
+	go extractFromPage(linksChan, "QueuePriority100")
+	go extractFromPage(linksChan, "QueuePriority80")
+	go extractFromPage(linksChan, "QueuePriority50")
+	go extractFromPage(linksChan, "QueuePriority30")
 	// start goroutines
 	for i := 1; i <= *numOfRoutines; i++ {
 		go saveNewLink(linksChan, newUrls)
-		go extractFromPage(linksChan, "normalPrioQueue")
+		go extractFromPage(linksChan, "QueuePriority20")
 	}
 
 	// print a staus update every two seconds

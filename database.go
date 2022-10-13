@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"log"
 	"os"
+	"path"
 
 	"github.com/go-redis/redis"
 	_ "github.com/mattn/go-sqlite3"
@@ -119,4 +120,15 @@ start:
 	}
 
 	return id
+}
+
+func saveToFile(filename string, data *[]byte) {
+	filename = path.Join("downloaded", filename)
+
+	f, err := os.Create(filename)
+	check(err)
+	defer f.Close()
+
+	_, err = f.Write(*data)
+	check(err)
 }
