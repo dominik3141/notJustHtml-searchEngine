@@ -5,6 +5,7 @@
 ## Low priority
 
 ## Long term
+* Reorganize code into modules (so that the graph program can use the same type definitions)
 * Save the whole file for certain content-types, i.e. exe files, csv files
 * Implement something like pageRank
 * Extract keywords (for search) from every site

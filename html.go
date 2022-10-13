@@ -14,46 +14,14 @@ import (
 	"golang.org/x/net/html"
 )
 
-// func getID(url string) *Site {
-func getID(url string) int64 {
-	site := new(Site)
-	var i int
-start:
-
-	id, err := rdb.HGet("SiteIDs", url).Int64()
-	checkRedisErr(err)
-	site.ID = id
-	if id == 0 {
-		lockDb.Lock()
-		err = db.NewSelect().Model(site).Where("url = ?", url).Scan(context.Background(), site)
-		lockDb.Unlock()
-		if err != nil || site.ID == 0 {
-			// create new site
-			lockDb.Lock()
-			_, err := db.NewInsert().Model(&Site{Url: url}).Exec(context.Background())
-			handleSqliteErr(err)
-			lockDb.Unlock()
-			if i > 3 {
-				panic("loop")
-			}
-			i++
-			goto start
-		}
-		err = rdb.HSet("SiteIDs", url, site.ID).Err()
-		checkRedisErr(err)
-	}
-
-	return site.ID
-}
-
 func saveNewLink(inChan <-chan *Link, outChan chan<- *url.URL) {
 	for {
 		link := <-inChan
 
 		linkRel := &LinkRel{
 			TimeFound:   link.TimeFound.UnixMicro(),
-			Origin:      getID(link.OrigUrl.String()),
-			Destination: getID(link.DestUrl.String()),
+			Origin:      getSiteID(link.OrigUrl.String()),
+			Destination: getSiteID(link.DestUrl.String()),
 		}
 
 		// add link to database
@@ -165,20 +133,20 @@ func extractFromPage(outChan chan<- *Link, queueName string) {
 
 		// Retrieve content information
 		hash := sha512.Sum512(body)
-		var contentType string
+		var contentTypeStr string
 		if n >= 512 {
-			contentType = http.DetectContentType(body[:512])
+			contentTypeStr = http.DetectContentType(body[:512])
 		} else {
-			contentType = http.DetectContentType(body)
+			contentTypeStr = http.DetectContentType(body)
 		}
-		content := Content{TimeFound: time.Now().UnixMicro(), SiteID: getID(url.String()), ContentType: contentType, Hash: &hash, Size: n, HttpStatusCode: resp.StatusCode}
+		content := Content{TimeFound: time.Now().UnixMicro(), SiteID: getSiteID(url.String()), ContentType: getContentTypeId(contentTypeStr), Hash: &hash, Size: n, HttpStatusCode: resp.StatusCode}
 		lockDb.Lock()
 		_, err = db.NewInsert().Model(&content).Exec(context.Background())
 		handleSqliteErr(err)
 		lockDb.Unlock()
 
 		// check if content type is html, otherwise the file can not be searched for links
-		if contentType[:9] != "text/html" {
+		if contentTypeStr[:9] != "text/html" {
 			// log.Printf("URL: %v. Content type is %v", url.String(), contentType)
 			continue
 		}

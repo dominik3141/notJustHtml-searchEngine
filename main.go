@@ -44,7 +44,7 @@ type Content struct {
 	ID             int64 `bun:",pk,autoincrement"`
 	TimeFound      int64
 	SiteID         int64
-	ContentType    string
+	ContentType    int64
 	HttpStatusCode int
 	Size           int
 	Hash           *[sha512.Size]byte
@@ -71,6 +71,7 @@ var lockDb sync.Mutex
 var sitesIndexed int
 var db *bun.DB
 var rdb *redis.Client
+var contentTypeToIdCache sync.Map
 
 func main() {
 	// create a channel to receive certain syscalls
