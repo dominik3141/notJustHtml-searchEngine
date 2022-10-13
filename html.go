@@ -85,6 +85,7 @@ func addToQueue(queueIn chan *url.URL) {
 			err = rdb.SAdd("highPrioQueue", url.String()).Err()
 			checkRedisErr(err)
 			knownDomains[url.Hostname()] = true
+			log.Printf("Found new site: %v. Known sites:%v,", url.Hostname(), len(knownDomains))
 		} else {
 			err = rdb.SAdd("normalPrioQueue", url.String()).Err()
 			checkRedisErr(err)

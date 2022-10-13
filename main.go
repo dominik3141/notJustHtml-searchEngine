@@ -64,7 +64,7 @@ type Errors struct {
 const (
 	createNewDb  = true
 	maxFilesize  = 2e7
-	maxNumOfUrls = 1e7 // an estimate of how many urls we want to index
+	maxNumOfUrls = 1e8 // an estimate of how many urls we want to index
 )
 
 var lockDb sync.Mutex
