@@ -9,11 +9,13 @@ require (
 
 require (
 	github.com/bits-and-blooms/bitset v1.3.3 // indirect
+	github.com/nfnt/resize v0.0.0-20180221191011-83c6a9932646 // indirect
 	github.com/onsi/ginkgo v1.16.5 // indirect
 	github.com/onsi/gomega v1.21.1 // indirect
 )
 
 require (
+	github.com/corona10/goimagehash v1.1.0
 	github.com/go-redis/redis v6.15.9+incompatible
 	github.com/icza/gox v0.0.0-20220921190100-610a6663952b
 	github.com/jinzhu/inflection v1.0.0 // indirect

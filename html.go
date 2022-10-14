@@ -104,13 +104,18 @@ func extractFromPage(outChan chan<- *Link, queueName string) {
 
 		sha1SumUrlBase64 := base64.URLEncoding.EncodeToString(sha1Sum[:])
 		sha1SumUrlBase64 = sha1SumUrlBase64[:20]
+
+		var aHash uint64
+		err = nil
 		switch contentTypeStr {
 		case "text/html":
 		case "text/javascript":
 		case "image/png":
 			saveToFile(sha1SumUrlBase64+".png", &body)
+			aHash, err = calcAvgHash(contentTypeStr, bytes.NewReader(body))
 		case "image/jpeg":
 			saveToFile(sha1SumUrlBase64+".jpg", &body)
+			aHash, err = calcAvgHash(contentTypeStr, bytes.NewReader(body))
 		case "application/x-gzip":
 			saveToFile(sha1SumUrlBase64+".gz", &body)
 		case "text/plain":
@@ -138,6 +143,11 @@ func extractFromPage(outChan chan<- *Link, queueName string) {
 		case " application/excel":
 			saveToFile(sha1SumUrlBase64+".xls", &body)
 		}
+		if err != nil {
+			log.Printf("URL %v. Error calculation perceptual hash. Err=%v", url.String(), err)
+			aHash = 0
+		}
+
 		content := Content{
 			TimeFound:      time.Now().UnixMicro(),
 			SiteID:         getSiteID(url.String()),
@@ -146,6 +156,7 @@ func extractFromPage(outChan chan<- *Link, queueName string) {
 			Size:           n,
 			Sha512Sum:      &sha512Sum,
 			Sha1Sum:        &sha1Sum,
+			AverageHash:    aHash,
 		}
 		dbMutex.Lock()
 		_, err = db.NewInsert().Model(&content).Exec(context.Background())

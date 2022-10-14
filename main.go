@@ -53,6 +53,7 @@ type Content struct {
 	Size           int
 	Sha512Sum      *[sha512.Size]byte
 	Sha1Sum        *[sha1.Size]byte
+	AverageHash    uint64 // a perceptual hash
 }
 
 type Errors struct {
