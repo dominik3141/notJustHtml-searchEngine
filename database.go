@@ -8,9 +8,9 @@ import (
 	"path"
 
 	"github.com/go-redis/redis"
-	_ "github.com/mattn/go-sqlite3"
+	_ "github.com/lib/pq"
 	"github.com/uptrace/bun"
-	"github.com/uptrace/bun/dialect/sqlitedialect"
+	"github.com/uptrace/bun/dialect/pgdialect"
 )
 
 type ContentTypes struct {
@@ -24,16 +24,11 @@ func getRedisClient() *redis.Client {
 	return rdb
 }
 
-func getDb(dbPath string) *bun.DB {
+func getDb() *bun.DB {
 	var err error
 
-	if createNewDb {
-		f, err := os.Create(dbPath)
-		check(err)
-		f.Close()
-	}
-
-	rawDb, err := sql.Open("sqlite3", dbPath)
+	connStr := "user=crawleru dbname=crawler password=crawlerP"
+	rawDb, err := sql.Open("postgres", connStr)
 	if err != nil {
 		log.Printf("Error opening database. err=%v", err)
 		panic(err)
@@ -42,7 +37,7 @@ func getDb(dbPath string) *bun.DB {
 		panic(err)
 	}
 
-	db := bun.NewDB(rawDb, sqlitedialect.New())
+	db := bun.NewDB(rawDb, pgdialect.New())
 
 	// create new tables
 	if createNewDb {
@@ -55,6 +50,8 @@ func getDb(dbPath string) *bun.DB {
 		_, err = db.NewCreateTable().Model(&Site{}).Exec(context.Background())
 		check(err)
 		_, err = db.NewCreateTable().Model(&ContentTypes{}).Exec(context.Background())
+		check(err)
+		_, err = db.NewCreateTable().Model(&LinkKeywordRel{}).Exec(context.Background())
 		check(err)
 	}
 
@@ -70,15 +67,11 @@ start:
 	checkRedisErr(err)
 	site.ID = id
 	if id == 0 {
-		dbMutex.Lock()
 		err = db.NewSelect().Model(site).Where("url = ?", url).Scan(context.Background(), site)
-		dbMutex.Unlock()
 		if err != nil || site.ID == 0 {
 			// create new site
-			dbMutex.Lock()
 			_, err := db.NewInsert().Model(&Site{Url: url}).Exec(context.Background())
 			handleBunSqlErr(err)
-			dbMutex.Unlock()
 			if i > 3 {
 				panic("loop")
 			}
@@ -100,14 +93,10 @@ func getContentTypeId(contentTypeStr string) int64 {
 start:
 	val, found := contentTypeToIdCache.Load(contentTypeStr)
 	if !found {
-		dbMutex.Lock()
 		err = db.NewSelect().Model(&ContentTypes{}).Column("id").Where("Name = ?", contentTypeStr).Scan(context.Background(), &id)
-		dbMutex.Unlock()
 		if err != nil || id == 0 {
-			dbMutex.Lock()
 			_, err = db.NewInsert().Model(&ContentTypes{Name: contentTypeStr}).Exec(context.Background())
 			handleBunSqlErr(err)
-			dbMutex.Unlock()
 			if i > 3 {
 				panic("loop")
 			}

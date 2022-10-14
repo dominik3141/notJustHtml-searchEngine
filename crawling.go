@@ -23,6 +23,9 @@ func saveNewLink(inChan <-chan *Link, outChan chan<- *Link, flaggedWords *[]Flag
 		// prioritize links which lead to a potentially malicious file
 		if strings.HasSuffix(urlStr, ".exe") || strings.HasSuffix(urlStr, ".apk") || strings.HasSuffix(urlStr, ".jar") || strings.HasSuffix(urlStr, ".msi") || strings.HasSuffix(urlStr, ".doc") {
 			return 100
+			// }
+		} else if strings.HasSuffix(urlStr, ".png") || strings.HasSuffix(urlStr, ".jpg") || strings.HasSuffix(urlStr, ".jpeg") {
+			return 90
 		}
 
 		// check if domain has been discovered before
@@ -31,7 +34,7 @@ func saveNewLink(inChan <-chan *Link, outChan chan<- *Link, flaggedWords *[]Flag
 			return 30
 		}
 
-		return 20
+		return 0
 	}
 
 	for {
@@ -43,7 +46,6 @@ func saveNewLink(inChan <-chan *Link, outChan chan<- *Link, flaggedWords *[]Flag
 			TimeFound:   link.TimeFound.UnixMicro(),
 			Origin:      getSiteID(link.OrigUrl.String()),
 			Destination: getSiteID(link.DestUrl.String()),
-			Keywords:    *link.Keywords,
 		}
 
 		// Use the keywords associated with the link to calculate an importance rating
@@ -62,10 +64,20 @@ func saveNewLink(inChan <-chan *Link, outChan chan<- *Link, flaggedWords *[]Flag
 		}
 
 		// add link to database
-		dbMutex.Lock()
 		_, err := db.NewInsert().Model(linkRel).Exec(context.Background())
 		handleBunSqlErr(err)
-		dbMutex.Unlock()
+
+		// save the keywords in the database
+		for i := range *link.Keywords {
+			keyword := &LinkKeywordRel{
+				// LinkId:     getLinkID(link),
+				SiteId:     getSiteID(link.DestUrl.String()),
+				Visibility: (*link.Keywords)[i].Visibility,
+				Text:       (*link.Keywords)[i].Text,
+			}
+			_, err = db.NewInsert().Model(keyword).Exec(context.Background())
+			handleBunSqlErr(err)
+		}
 
 		// send link to the queue handler
 		outChan <- link
@@ -84,6 +96,10 @@ func addToQueue(queueIn chan *Link) {
 
 		// check if the url has been indexed before
 		if filter.Test([]byte(link.DestUrl.String())) {
+			continue
+		}
+
+		if link.Priority == 0 {
 			continue
 		}
 

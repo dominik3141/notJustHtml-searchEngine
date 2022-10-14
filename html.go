@@ -42,10 +42,8 @@ func extractFromPage(outChan chan<- *Link, queueName string) {
 			if resp != nil {
 				dbErr.HttpStatusCode = resp.StatusCode
 			}
-			dbMutex.Lock()
 			_, err = db.NewInsert().Model(&dbErr).Exec(context.Background())
 			handleBunSqlErr(err)
-			dbMutex.Unlock()
 			continue
 		}
 
@@ -53,10 +51,8 @@ func extractFromPage(outChan chan<- *Link, queueName string) {
 		if resp.ContentLength >= maxFilesize {
 			log.Printf("URL: %v. Webpage is to big.", url.String())
 			dbErr := Errors{Url: url.String(), Time: time.Now(), ResponseToBig: true}
-			dbMutex.Lock()
 			_, err = db.NewInsert().Model(&dbErr).Exec(context.Background())
 			handleBunSqlErr(err)
-			dbMutex.Unlock()
 			continue
 		}
 
@@ -74,20 +70,16 @@ func extractFromPage(outChan chan<- *Link, queueName string) {
 		if err != nil && err != io.EOF {
 			log.Printf("URL: %v. Error reading response body. err=%v", url.String(), err)
 			dbErr := Errors{Url: url.String(), Time: time.Now(), ErrorReading: true}
-			dbMutex.Lock()
 			_, err = db.NewInsert().Model(&dbErr).Exec(context.Background())
 			handleBunSqlErr(err)
-			dbMutex.Unlock()
 			continue
 		}
 		n = len(body)
 		// check if content length indicated in the http header equals the number of bytes that we did actually read
 		if n != int(resp.ContentLength) && resp.ContentLength != -1 {
 			dbErr := Errors{Url: url.String(), Time: time.Now(), ResponseSizeUneqContLen: true}
-			dbMutex.Lock()
 			_, err = db.NewInsert().Model(&dbErr).Exec(context.Background())
 			handleBunSqlErr(err)
-			dbMutex.Unlock()
 		}
 		err = resp.Body.Close()
 		check(err)
@@ -158,10 +150,8 @@ func extractFromPage(outChan chan<- *Link, queueName string) {
 			Sha1Sum:        &sha1Sum,
 			AverageHash:    aHash,
 		}
-		dbMutex.Lock()
 		_, err = db.NewInsert().Model(&content).Exec(context.Background())
 		handleBunSqlErr(err)
-		dbMutex.Unlock()
 
 		// check if content type is html, otherwise the file can not be searched for links
 		if len(contentTypeStr) >= 8 && contentTypeStr[:9] != "text/html" {
@@ -173,10 +163,8 @@ func extractFromPage(outChan chan<- *Link, queueName string) {
 		if err != nil {
 			log.Printf("URL: %v. html parsing error. err=%v", url, err)
 			dbErr := Errors{Url: url.String(), ParsingError: true, Time: time.Now()}
-			dbMutex.Lock()
 			_, err = db.NewInsert().Model(&dbErr).Exec(context.Background())
 			handleBunSqlErr(err)
-			dbMutex.Unlock()
 			continue
 		}
 
