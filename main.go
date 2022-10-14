@@ -25,7 +25,7 @@ type Link struct {
 	OrigUrl         *url.URL
 	DestUrl         *url.URL
 	SurroundingNode []byte
-	Keywords        []HtmlText
+	Keywords        *[]HtmlText
 }
 
 type LinkRel struct {
@@ -64,7 +64,7 @@ type Errors struct {
 
 const (
 	createNewDb  = true
-	maxFilesize  = 2e7
+	maxFilesize  = 2e8
 	maxNumOfUrls = 1e7 // an estimate of how many urls we want to index
 )
 
@@ -80,7 +80,6 @@ func main() {
 
 	// parse command line arguments
 	dbPath := flag.String("dbPath", "testDbxxx.sqlite", "Path to the database")
-	rawStartUrl := flag.String("url", "", "Url to start crawling at")
 	numOfRoutines := flag.Int("n", 3, "Number of crawlers to run in parralel")
 	flag.Parse()
 
@@ -91,11 +90,13 @@ func main() {
 	defer db.Close()
 
 	// create channels
-	linksChan := make(chan *Link, 1e2)  // extractFromPage -> saveNewLink
-	newUrls := make(chan *url.URL, 1e2) // saveNewLink -> handleQueue
+	linksChan := make(chan *Link, 1e2) // extractFromPage -> saveNewLink
+	newUrls := make(chan *Link, 1e2)   // saveNewLink -> handleQueue
+
+	flaggedWords := loadFlaggedWords()
 
 	// start queueWorker
-	go addToQueue(newUrls)
+	go addToQueue(newUrls, flaggedWords)
 
 	// add to startSites
 	addStartSites(newUrls)
@@ -106,16 +107,18 @@ func main() {
 
 	go extractFromPage(linksChan, "QueuePriority100")
 	go extractFromPage(linksChan, "QueuePriority80")
+	go extractFromPage(linksChan, "QueuePriority70")
 	go extractFromPage(linksChan, "QueuePriority50")
 	go extractFromPage(linksChan, "QueuePriority30")
 	// start goroutines
 	for i := 1; i <= *numOfRoutines; i++ {
 		go saveNewLink(linksChan, newUrls)
 		go extractFromPage(linksChan, "QueuePriority20")
+		go extractFromPage(linksChan, "QueuePriority70")
 	}
 
 	// print a staus update every two seconds
-	log.Printf("Starting to crawl at: %v", *rawStartUrl)
+	// log.Printf("Starting to crawl at: %v", *rawStartUrl)
 	for {
 		time.Sleep(2 * time.Second)
 

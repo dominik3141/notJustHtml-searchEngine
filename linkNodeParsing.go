@@ -9,9 +9,8 @@ import (
 )
 
 type ReducedHtmlNode struct {
-	Type html.NodeType
-	Data string
-	// Namespace string
+	Type   html.NodeType
+	Data   string
 	Attr   []html.Attribute
 	Childs []*ReducedHtmlNode
 }
@@ -70,13 +69,14 @@ func getAllLinks(originUrl *url.URL, node *html.Node, links chan<- *Link) {
 				reducedNode := reduceHtmlNode(c)
 				// jsonNode, err := json.Marshal(reducedNode)
 				// check(err)
+				keywords := extractKeywords(reducedNode, 1)
 
 				link := Link{
 					TimeFound: time.Now(),
 					OrigUrl:   originUrl,
 					DestUrl:   linkDst,
 					// SurroundingNode: jsonNode,
-					Keywords: extractKeywords(reducedNode, 10),
+					Keywords: &keywords,
 				}
 
 				links <- &link
@@ -92,24 +92,26 @@ func getAllLinks(originUrl *url.URL, node *html.Node, links chan<- *Link) {
 	}
 }
 
+// search the child nodes of a html link node for a text node
+// an example of that would be a h3 node that serves as the link text
 func extractKeywords(rNode *ReducedHtmlNode, multiplier int) []HtmlText {
 	keywords := make([]HtmlText, 0)
 
 	switch rNode.Data {
 	case "h1":
-		multiplier = 1
+		multiplier = 10
 	case "h2":
-		multiplier = 2
+		multiplier = 9
 	case "h3":
-		multiplier = 3
+		multiplier = 8
 	case "h4":
-		multiplier = 4
-	case "h5":
-		multiplier = 5
-	case "h6":
-		multiplier = 6
-	case "h7":
 		multiplier = 7
+	case "h5":
+		multiplier = 6
+	case "h6":
+		multiplier = 5
+	case "h7":
+		multiplier = 4
 	}
 
 	if rNode.Type == html.TextNode && rNode.Data != "" {
@@ -127,7 +129,3 @@ func extractKeywords(rNode *ReducedHtmlNode, multiplier int) []HtmlText {
 
 	return keywords
 }
-
-// search the child nodes of a html link node for a text node
-// an example of that would be a h3 node that serves as the link text
-// func getLinkText(linkNode *html.Node) string

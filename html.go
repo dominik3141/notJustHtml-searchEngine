@@ -14,7 +14,7 @@ import (
 	"golang.org/x/net/html"
 )
 
-func saveNewLink(inChan <-chan *Link, outChan chan<- *url.URL) {
+func saveNewLink(inChan <-chan *Link, outChan chan<- *Link) {
 	for {
 		link := <-inChan
 
@@ -22,7 +22,7 @@ func saveNewLink(inChan <-chan *Link, outChan chan<- *url.URL) {
 			TimeFound:   link.TimeFound.UnixMicro(),
 			Origin:      getSiteID(link.OrigUrl.String()),
 			Destination: getSiteID(link.DestUrl.String()),
-			Keywords:    link.Keywords,
+			Keywords:    *link.Keywords,
 		}
 
 		// add link to database
@@ -31,13 +31,13 @@ func saveNewLink(inChan <-chan *Link, outChan chan<- *url.URL) {
 		handleSqliteErr(err)
 		lockDb.Unlock()
 
-		outChan <- link.DestUrl
+		outChan <- link
 	}
 }
 
 func extractFromPage(outChan chan<- *Link, queueName string) {
-	bodyContainer := make([]byte, maxFilesize)
-	var body []byte
+	body := make([]byte, maxFilesize)
+	var n int
 
 	for {
 		rawUrl, err := rdb.SPop(queueName).Result()
@@ -81,7 +81,16 @@ func extractFromPage(outChan chan<- *Link, queueName string) {
 		}
 
 		// read body
-		n, err := resp.Body.Read(bodyContainer)
+		body = body[:0]
+		for {
+			n, err = resp.Body.Read(body[len(body):cap(body)])
+			body = body[:len(body)+n]
+			if err != nil {
+				if err == io.EOF {
+					break
+				}
+			}
+		}
 		if err != nil && err != io.EOF {
 			log.Printf("URL: %v. Error reading response body. err=%v", url.String(), err)
 			dbErr := Errors{Url: url.String(), Time: time.Now(), ErrorReading: true}
@@ -92,7 +101,7 @@ func extractFromPage(outChan chan<- *Link, queueName string) {
 			continue
 		}
 		if n != int(resp.ContentLength) && resp.ContentLength != -1 {
-			log.Printf("URL: %v. Length of response is different from the content length indicated in the response header. %v vs. %v", url.String(), n, resp.ContentLength)
+			// log.Printf("URL: %v. Length of response is different from the content length indicated in the response header. %v vs. %v", url.String(), n, resp.ContentLength)
 			dbErr := Errors{Url: url.String(), Time: time.Now(), ResponseSizeUneqContLen: true}
 			lockDb.Lock()
 			_, err = db.NewInsert().Model(&dbErr).Exec(context.Background())
@@ -101,7 +110,6 @@ func extractFromPage(outChan chan<- *Link, queueName string) {
 		}
 		err = resp.Body.Close()
 		check(err)
-		body = bodyContainer[:n]
 
 		// Retrieve content information
 		hash := sha512.Sum512(body)
@@ -112,7 +120,8 @@ func extractFromPage(outChan chan<- *Link, queueName string) {
 			contentTypeStr = http.DetectContentType(body)
 		}
 
-		hashBase64 := base64.StdEncoding.EncodeToString(hash[:])
+		hashBase64 := base64.URLEncoding.EncodeToString(hash[:])
+		hashBase64 = hashBase64[:20]
 		switch contentTypeStr {
 		case "text/html":
 		case "text/javascript":
