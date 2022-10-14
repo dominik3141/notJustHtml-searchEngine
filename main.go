@@ -119,6 +119,7 @@ func main() {
 		go extractFromPage(linksChan, "QueuePriority20")
 		go extractFromPage(linksChan, "QueuePriority30")
 		go extractFromPage(linksChan, "QueuePriority70")
+		go extractFromPage(linksChan, "QueuePriority70")
 		go extractFromPage(linksChan, "QueuePriority100")
 		go extractFromPage(linksChan, "QueuePriority100")
 	}

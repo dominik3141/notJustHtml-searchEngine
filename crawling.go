@@ -162,7 +162,7 @@ func addStartSites(out chan *Link) {
 	for scanner.Scan() {
 		url, err := url.Parse(scanner.Text())
 		check(err)
-		out <- &Link{DestUrl: url}
+		out <- &Link{DestUrl: url, Priority: 30}
 	}
 
 	check(scanner.Err())
