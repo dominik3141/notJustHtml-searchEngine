@@ -6,7 +6,6 @@ import (
 	"image/jpeg"
 	"image/png"
 	"io"
-	"log"
 
 	"github.com/corona10/goimagehash"
 )
@@ -21,14 +20,13 @@ func calcAvgHash(mimeType string, file io.Reader) (uint64, error) {
 	case "image/png":
 		img, err = png.Decode(file)
 	default:
-		return 0, errors.New("Unknown mime-type")
+		return 0, errors.New("unknown mime-type")
 	}
 	if err != nil {
-		log.Println("ERROR in calcAvgHash:", err)
 		return 0, err
 	}
 
 	hash, err := goimagehash.AverageHash(img)
 
-	return hash.GetHash(), nil
+	return hash.GetHash(), err
 }
