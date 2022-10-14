@@ -70,15 +70,15 @@ start:
 	checkRedisErr(err)
 	site.ID = id
 	if id == 0 {
-		lockDb.Lock()
+		dbMutex.Lock()
 		err = db.NewSelect().Model(site).Where("url = ?", url).Scan(context.Background(), site)
-		lockDb.Unlock()
+		dbMutex.Unlock()
 		if err != nil || site.ID == 0 {
 			// create new site
-			lockDb.Lock()
+			dbMutex.Lock()
 			_, err := db.NewInsert().Model(&Site{Url: url}).Exec(context.Background())
-			handleSqliteErr(err)
-			lockDb.Unlock()
+			handleBunSqlErr(err)
+			dbMutex.Unlock()
 			if i > 3 {
 				panic("loop")
 			}
@@ -100,14 +100,14 @@ func getContentTypeId(contentTypeStr string) int64 {
 start:
 	val, found := contentTypeToIdCache.Load(contentTypeStr)
 	if !found {
-		lockDb.Lock()
+		dbMutex.Lock()
 		err = db.NewSelect().Model(&ContentTypes{}).Column("id").Where("Name = ?", contentTypeStr).Scan(context.Background(), &id)
-		lockDb.Unlock()
+		dbMutex.Unlock()
 		if err != nil || id == 0 {
-			lockDb.Lock()
+			dbMutex.Lock()
 			_, err = db.NewInsert().Model(&ContentTypes{Name: contentTypeStr}).Exec(context.Background())
-			handleSqliteErr(err)
-			lockDb.Unlock()
+			handleBunSqlErr(err)
+			dbMutex.Unlock()
 			if i > 3 {
 				panic("loop")
 			}

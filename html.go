@@ -26,10 +26,10 @@ func saveNewLink(inChan <-chan *Link, outChan chan<- *Link) {
 		}
 
 		// add link to database
-		lockDb.Lock()
+		dbMutex.Lock()
 		_, err := db.NewInsert().Model(linkRel).Exec(context.Background())
-		handleSqliteErr(err)
-		lockDb.Unlock()
+		handleBunSqlErr(err)
+		dbMutex.Unlock()
 
 		outChan <- link
 	}
@@ -62,10 +62,10 @@ func extractFromPage(outChan chan<- *Link, queueName string) {
 			if resp != nil {
 				dbErr.HttpStatusCode = resp.StatusCode
 			}
-			lockDb.Lock()
+			dbMutex.Lock()
 			_, err = db.NewInsert().Model(&dbErr).Exec(context.Background())
-			handleSqliteErr(err)
-			lockDb.Unlock()
+			handleBunSqlErr(err)
+			dbMutex.Unlock()
 			continue
 		}
 
@@ -73,10 +73,10 @@ func extractFromPage(outChan chan<- *Link, queueName string) {
 		if resp.ContentLength >= maxFilesize {
 			log.Printf("URL: %v. Webpage is to big.", url.String())
 			dbErr := Errors{Url: url.String(), Time: time.Now(), ResponseToBig: true}
-			lockDb.Lock()
+			dbMutex.Lock()
 			_, err = db.NewInsert().Model(&dbErr).Exec(context.Background())
-			handleSqliteErr(err)
-			lockDb.Unlock()
+			handleBunSqlErr(err)
+			dbMutex.Unlock()
 			continue
 		}
 
@@ -94,25 +94,26 @@ func extractFromPage(outChan chan<- *Link, queueName string) {
 		if err != nil && err != io.EOF {
 			log.Printf("URL: %v. Error reading response body. err=%v", url.String(), err)
 			dbErr := Errors{Url: url.String(), Time: time.Now(), ErrorReading: true}
-			lockDb.Lock()
+			dbMutex.Lock()
 			_, err = db.NewInsert().Model(&dbErr).Exec(context.Background())
-			handleSqliteErr(err)
-			lockDb.Unlock()
+			handleBunSqlErr(err)
+			dbMutex.Unlock()
 			continue
 		}
+		n = len(body)
 		if n != int(resp.ContentLength) && resp.ContentLength != -1 {
 			// log.Printf("URL: %v. Length of response is different from the content length indicated in the response header. %v vs. %v", url.String(), n, resp.ContentLength)
 			dbErr := Errors{Url: url.String(), Time: time.Now(), ResponseSizeUneqContLen: true}
-			lockDb.Lock()
+			dbMutex.Lock()
 			_, err = db.NewInsert().Model(&dbErr).Exec(context.Background())
-			handleSqliteErr(err)
-			lockDb.Unlock()
+			handleBunSqlErr(err)
+			dbMutex.Unlock()
 		}
 		err = resp.Body.Close()
 		check(err)
 
 		// Retrieve content information
-		hash := sha512.Sum512(body)
+		sha512Sum := sha512.Sum512(body)
 		var contentTypeStr string
 		if n >= 512 {
 			contentTypeStr = http.DetectContentType(body[:512])
@@ -120,47 +121,47 @@ func extractFromPage(outChan chan<- *Link, queueName string) {
 			contentTypeStr = http.DetectContentType(body)
 		}
 
-		hashBase64 := base64.URLEncoding.EncodeToString(hash[:])
-		hashBase64 = hashBase64[:20]
+		sha512SumUrlBase64 := base64.URLEncoding.EncodeToString(sha512Sum[:])
+		sha512SumUrlBase64 = sha512SumUrlBase64[:20]
 		switch contentTypeStr {
 		case "text/html":
 		case "text/javascript":
 		case "image/png":
-			saveToFile(hashBase64+".png", &body)
+			saveToFile(sha512SumUrlBase64+".png", &body)
 		case "image/jpeg":
-			saveToFile(hashBase64+".jpg", &body)
+			saveToFile(sha512SumUrlBase64+".jpg", &body)
 		case "application/x-gzip":
-			saveToFile(hashBase64+".gz", &body)
+			saveToFile(sha512SumUrlBase64+".gz", &body)
 		case "text/plain":
-			saveToFile(hashBase64+".txt", &body)
+			saveToFile(sha512SumUrlBase64+".txt", &body)
 		case "application/java-archive":
-			saveToFile(hashBase64+".jar", &body)
+			saveToFile(sha512SumUrlBase64+".jar", &body)
 		case "text/csv":
-			saveToFile(hashBase64+".csv", &body)
+			saveToFile(sha512SumUrlBase64+".csv", &body)
 		case "application/json":
-			saveToFile(hashBase64+".json", &body)
+			saveToFile(sha512SumUrlBase64+".json", &body)
 		case "application/zip":
-			saveToFile(hashBase64+".zip", &body)
+			saveToFile(sha512SumUrlBase64+".zip", &body)
 		case "application/pdf":
-			saveToFile(hashBase64+".pdf", &body)
+			saveToFile(sha512SumUrlBase64+".pdf", &body)
 		case "video/mp4":
-			saveToFile(hashBase64+".mp4", &body)
+			saveToFile(sha512SumUrlBase64+".mp4", &body)
 		case "application/oxtet-stream":
-			saveToFile(hashBase64+".bin", &body)
+			saveToFile(sha512SumUrlBase64+".bin", &body)
 		case "application/vnd.android.package-archive":
-			saveToFile(hashBase64+".apk", &body)
+			saveToFile(sha512SumUrlBase64+".apk", &body)
 		case " application/x-msdownload":
-			saveToFile(hashBase64+".exe", &body)
+			saveToFile(sha512SumUrlBase64+".exe", &body)
 		case " application/word":
-			saveToFile(hashBase64+".doc", &body)
+			saveToFile(sha512SumUrlBase64+".doc", &body)
 		case " application/excel":
-			saveToFile(hashBase64+".xl", &body)
+			saveToFile(sha512SumUrlBase64+".xl", &body)
 		}
-		content := Content{TimeFound: time.Now().UnixMicro(), SiteID: getSiteID(url.String()), ContentTypeId: getContentTypeId(contentTypeStr), Hash: &hash, Size: n, HttpStatusCode: resp.StatusCode}
-		lockDb.Lock()
+		content := Content{TimeFound: time.Now().UnixMicro(), SiteID: getSiteID(url.String()), ContentTypeId: getContentTypeId(contentTypeStr), Sha512Sum: &sha512Sum, Size: n, HttpStatusCode: resp.StatusCode}
+		dbMutex.Lock()
 		_, err = db.NewInsert().Model(&content).Exec(context.Background())
-		handleSqliteErr(err)
-		lockDb.Unlock()
+		handleBunSqlErr(err)
+		dbMutex.Unlock()
 
 		// check if content type is html, otherwise the file can not be searched for links
 		if len(contentTypeStr) >= 8 && contentTypeStr[:9] != "text/html" {
@@ -173,10 +174,10 @@ func extractFromPage(outChan chan<- *Link, queueName string) {
 		if err != nil {
 			log.Printf("URL: %v. html parsing error. err=%v", url, err)
 			dbErr := Errors{Url: url.String(), ParsingError: true, Time: time.Now()}
-			lockDb.Lock()
+			dbMutex.Lock()
 			_, err = db.NewInsert().Model(&dbErr).Exec(context.Background())
-			handleSqliteErr(err)
-			lockDb.Unlock()
+			handleBunSqlErr(err)
+			dbMutex.Unlock()
 			continue
 		}
 

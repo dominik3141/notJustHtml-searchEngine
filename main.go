@@ -48,7 +48,7 @@ type Content struct {
 	ContentTypeId  int64
 	HttpStatusCode int
 	Size           int
-	Hash           *[sha512.Size]byte
+	Sha512Sum      *[sha512.Size]byte
 }
 
 type Errors struct {
@@ -68,7 +68,7 @@ const (
 	maxNumOfUrls = 1e7 // an estimate of how many urls we want to index
 )
 
-var lockDb sync.Mutex
+var dbMutex sync.Mutex
 var sitesIndexed int
 var db *bun.DB
 var rdb *redis.Client
@@ -105,12 +105,12 @@ func main() {
 	go handleSigTerm(sigChan)
 	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT)
 
+	// start goroutines
 	go extractFromPage(linksChan, "QueuePriority100")
 	go extractFromPage(linksChan, "QueuePriority80")
 	go extractFromPage(linksChan, "QueuePriority70")
 	go extractFromPage(linksChan, "QueuePriority50")
 	go extractFromPage(linksChan, "QueuePriority30")
-	// start goroutines
 	for i := 1; i <= *numOfRoutines; i++ {
 		go saveNewLink(linksChan, newUrls)
 		go extractFromPage(linksChan, "QueuePriority20")
@@ -118,7 +118,6 @@ func main() {
 	}
 
 	// print a staus update every two seconds
-	// log.Printf("Starting to crawl at: %v", *rawStartUrl)
 	for {
 		time.Sleep(2 * time.Second)
 
@@ -131,7 +130,7 @@ func handleSigTerm(sig chan os.Signal) {
 	log.Printf("Received signal %v", received)
 
 	log.Printf("Locking database in order to close it")
-	lockDb.Lock()
+	dbMutex.Lock()
 	log.Printf("Database locked")
 	db.Close()
 	log.Printf("Database closed")
@@ -145,7 +144,7 @@ func check(err error) {
 	}
 }
 
-func handleSqliteErr(err error) {
+func handleBunSqlErr(err error) {
 	if err != nil {
 		panic(err)
 	}
