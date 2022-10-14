@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha1"
 	"crypto/sha512"
 	"encoding/base64"
 	"io"
@@ -13,27 +14,6 @@ import (
 
 	"golang.org/x/net/html"
 )
-
-func saveNewLink(inChan <-chan *Link, outChan chan<- *Link) {
-	for {
-		link := <-inChan
-
-		linkRel := &LinkRel{
-			TimeFound:   link.TimeFound.UnixMicro(),
-			Origin:      getSiteID(link.OrigUrl.String()),
-			Destination: getSiteID(link.DestUrl.String()),
-			Keywords:    *link.Keywords,
-		}
-
-		// add link to database
-		dbMutex.Lock()
-		_, err := db.NewInsert().Model(linkRel).Exec(context.Background())
-		handleBunSqlErr(err)
-		dbMutex.Unlock()
-
-		outChan <- link
-	}
-}
 
 func extractFromPage(outChan chan<- *Link, queueName string) {
 	body := make([]byte, maxFilesize)
@@ -101,8 +81,8 @@ func extractFromPage(outChan chan<- *Link, queueName string) {
 			continue
 		}
 		n = len(body)
+		// check if content length indicated in the http header equals the number of bytes that we did actually read
 		if n != int(resp.ContentLength) && resp.ContentLength != -1 {
-			// log.Printf("URL: %v. Length of response is different from the content length indicated in the response header. %v vs. %v", url.String(), n, resp.ContentLength)
 			dbErr := Errors{Url: url.String(), Time: time.Now(), ResponseSizeUneqContLen: true}
 			dbMutex.Lock()
 			_, err = db.NewInsert().Model(&dbErr).Exec(context.Background())
@@ -114,6 +94,7 @@ func extractFromPage(outChan chan<- *Link, queueName string) {
 
 		// Retrieve content information
 		sha512Sum := sha512.Sum512(body)
+		sha1Sum := sha1.Sum(body)
 		var contentTypeStr string
 		if n >= 512 {
 			contentTypeStr = http.DetectContentType(body[:512])
@@ -121,43 +102,51 @@ func extractFromPage(outChan chan<- *Link, queueName string) {
 			contentTypeStr = http.DetectContentType(body)
 		}
 
-		sha512SumUrlBase64 := base64.URLEncoding.EncodeToString(sha512Sum[:])
-		sha512SumUrlBase64 = sha512SumUrlBase64[:20]
+		sha1SumUrlBase64 := base64.URLEncoding.EncodeToString(sha1Sum[:])
+		sha1SumUrlBase64 = sha1SumUrlBase64[:20]
 		switch contentTypeStr {
 		case "text/html":
 		case "text/javascript":
 		case "image/png":
-			saveToFile(sha512SumUrlBase64+".png", &body)
+			saveToFile(sha1SumUrlBase64+".png", &body)
 		case "image/jpeg":
-			saveToFile(sha512SumUrlBase64+".jpg", &body)
+			saveToFile(sha1SumUrlBase64+".jpg", &body)
 		case "application/x-gzip":
-			saveToFile(sha512SumUrlBase64+".gz", &body)
+			saveToFile(sha1SumUrlBase64+".gz", &body)
 		case "text/plain":
-			saveToFile(sha512SumUrlBase64+".txt", &body)
+			saveToFile(sha1SumUrlBase64+".txt", &body)
 		case "application/java-archive":
-			saveToFile(sha512SumUrlBase64+".jar", &body)
+			saveToFile(sha1SumUrlBase64+".jar", &body)
 		case "text/csv":
-			saveToFile(sha512SumUrlBase64+".csv", &body)
+			saveToFile(sha1SumUrlBase64+".csv", &body)
 		case "application/json":
-			saveToFile(sha512SumUrlBase64+".json", &body)
+			saveToFile(sha1SumUrlBase64+".json", &body)
 		case "application/zip":
-			saveToFile(sha512SumUrlBase64+".zip", &body)
+			saveToFile(sha1SumUrlBase64+".zip", &body)
 		case "application/pdf":
-			saveToFile(sha512SumUrlBase64+".pdf", &body)
+			saveToFile(sha1SumUrlBase64+".pdf", &body)
 		case "video/mp4":
-			saveToFile(sha512SumUrlBase64+".mp4", &body)
+			saveToFile(sha1SumUrlBase64+".mp4", &body)
 		case "application/oxtet-stream":
-			saveToFile(sha512SumUrlBase64+".bin", &body)
+			saveToFile(sha1SumUrlBase64+".bin", &body)
 		case "application/vnd.android.package-archive":
-			saveToFile(sha512SumUrlBase64+".apk", &body)
+			saveToFile(sha1SumUrlBase64+".apk", &body)
 		case " application/x-msdownload":
-			saveToFile(sha512SumUrlBase64+".exe", &body)
+			saveToFile(sha1SumUrlBase64+".exe", &body)
 		case " application/word":
-			saveToFile(sha512SumUrlBase64+".doc", &body)
+			saveToFile(sha1SumUrlBase64+".doc", &body)
 		case " application/excel":
-			saveToFile(sha512SumUrlBase64+".xl", &body)
+			saveToFile(sha1SumUrlBase64+".xls", &body)
 		}
-		content := Content{TimeFound: time.Now().UnixMicro(), SiteID: getSiteID(url.String()), ContentTypeId: getContentTypeId(contentTypeStr), Sha512Sum: &sha512Sum, Size: n, HttpStatusCode: resp.StatusCode}
+		content := Content{
+			TimeFound:      time.Now().UnixMicro(),
+			SiteID:         getSiteID(url.String()),
+			ContentTypeId:  getContentTypeId(contentTypeStr),
+			HttpStatusCode: resp.StatusCode,
+			Size:           n,
+			Sha512Sum:      &sha512Sum,
+			Sha1Sum:        &sha1Sum,
+		}
 		dbMutex.Lock()
 		_, err = db.NewInsert().Model(&content).Exec(context.Background())
 		handleBunSqlErr(err)
@@ -165,7 +154,6 @@ func extractFromPage(outChan chan<- *Link, queueName string) {
 
 		// check if content type is html, otherwise the file can not be searched for links
 		if len(contentTypeStr) >= 8 && contentTypeStr[:9] != "text/html" {
-			// log.Printf("URL: %v. Content type is %v", url.String(), contentType)
 			continue
 		}
 

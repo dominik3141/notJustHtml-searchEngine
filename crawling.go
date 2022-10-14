@@ -2,10 +2,10 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/csv"
 	"fmt"
 	"io"
-	"log"
 	"net/url"
 	"os"
 	"strconv"
@@ -14,51 +14,20 @@ import (
 	"github.com/bits-and-blooms/bloom/v3"
 )
 
-func addToQueue(queueIn chan *Link, flaggedWords *[]FlaggedWord) {
-	filter := bloom.NewWithEstimates(maxNumOfUrls, 0.01)
-	knownDomains := make(map[string]bool)
-	// boringDomains := *loadBoringDomainsList()
-	interestingDomains := *loadInterestingDomainsList()
-	var err error
-	var queueName string
-	var priority int
-
-	calcUrlPriority := func(link *Link) int {
+func saveNewLink(inChan <-chan *Link, outChan chan<- *Link, flaggedWords *[]FlaggedWord) {
+	var rating float64
+	calcLinkPriority := func(link *Link) int {
 		url := link.DestUrl
-
-		// check if too popular
-		// if boringDomains[url.Hostname()] {
-		// 	return 0
-		// }
-
-		// identify ending
 		urlStr := strings.ToLower(url.String())
-		if strings.HasSuffix(urlStr, ".mp4") || strings.HasSuffix(urlStr, ".jpg") || strings.HasSuffix(urlStr, ".png") || strings.HasSuffix(urlStr, ".csv") || strings.HasSuffix(urlStr, ".pdf") || strings.HasSuffix(urlStr, ".tex") {
-			return 80
-		} else if strings.HasSuffix(urlStr, ".exe") || strings.HasSuffix(urlStr, ".apk") || strings.HasSuffix(urlStr, ".jar") || strings.HasSuffix(urlStr, ".msi") || strings.HasSuffix(urlStr, ".doc") {
+
+		// prioritize links which lead to a potentially malicious file
+		if strings.HasSuffix(urlStr, ".exe") || strings.HasSuffix(urlStr, ".apk") || strings.HasSuffix(urlStr, ".jar") || strings.HasSuffix(urlStr, ".msi") || strings.HasSuffix(urlStr, ".doc") {
 			return 100
 		}
 
-		// check if url leads to an interesting domain
-		if interestingDomains[url.Hostname()] {
-			return 50
-		}
-
-		// check for keywords
-		if link.Keywords != nil {
-			rating := checkForFlaggedWords(flaggedWords, link.Keywords)
-			if rating != 0 {
-				log.Printf("URL: %v. Rating: %v", url.String(), rating)
-			}
-			if rating >= 10 {
-				return 70
-			}
-		}
-
 		// check if domain has been discovered before
-		if !knownDomains[url.Hostname()] {
-			log.Printf("Found new site: %v. Known sites: %v,", url.Hostname(), len(knownDomains))
-			knownDomains[url.Hostname()] = true
+		_, isKnown := knownDomains.LoadOrStore(url.Hostname(), true)
+		if !isKnown {
 			return 30
 		}
 
@@ -66,26 +35,68 @@ func addToQueue(queueIn chan *Link, flaggedWords *[]FlaggedWord) {
 	}
 
 	for {
+		// get the next link from the channel
+		link := <-inChan
+
+		// create a link relation from our Link struct
+		linkRel := &LinkRel{
+			TimeFound:   link.TimeFound.UnixMicro(),
+			Origin:      getSiteID(link.OrigUrl.String()),
+			Destination: getSiteID(link.DestUrl.String()),
+			Keywords:    *link.Keywords,
+		}
+
+		// Use the keywords associated with the link to calculate an importance rating
+		if link.Keywords != nil {
+			rating = calcLinkRating(flaggedWords, link.Keywords)
+			link.Rating = rating
+			linkRel.Rating = rating
+		}
+
+		// calculate link priority for the queue handler
+		link.Priority = calcLinkPriority(link)
+
+		// overwrite link priority if link rating is high enough
+		if link.Rating > 1 && link.Priority < 100 {
+			link.Priority = 70
+		}
+
+		// add link to database
+		dbMutex.Lock()
+		_, err := db.NewInsert().Model(linkRel).Exec(context.Background())
+		handleBunSqlErr(err)
+		dbMutex.Unlock()
+
+		// send link to the queue handler
+		outChan <- link
+	}
+}
+
+// add a link to a queue depending on the links rating and priority
+func addToQueue(queueIn chan *Link) {
+	filter := bloom.NewWithEstimates(maxNumOfUrls, 0.01)
+	var err error
+	var queueName string
+
+	for {
+		// get the next url from the channel
 		link := <-queueIn
-		url := link.DestUrl
 
-		if filter.Test([]byte(url.String())) {
+		// check if the url has been indexed before
+		if filter.Test([]byte(link.DestUrl.String())) {
 			continue
 		}
 
-		sitesIndexed++
-
-		// decide to which queue the link should be added
-		priority = calcUrlPriority(link)
-		// log.Printf("URL: %v. Priority: %v", link.DestUrl, priority)
-		if priority == 0 {
-			continue
-		}
-		queueName = fmt.Sprintf("QueuePriority%v", priority)
-		err = rdb.SAdd(queueName, url.String()).Err()
+		// add link to queue
+		queueName = fmt.Sprintf("QueuePriority%v", link.Priority)
+		err = rdb.SAdd(queueName, link.DestUrl.String()).Err()
 		checkRedisErr(err)
 
-		filter.Add([]byte(url.String()))
+		// increase the counter for indexed sites
+		sitesIndexed++
+
+		// add url to the bloom filter of known urls
+		filter.Add([]byte(link.DestUrl.String()))
 	}
 }
 
@@ -94,13 +105,16 @@ type FlaggedWord struct {
 	Word     string
 }
 
-func checkForFlaggedWords(flaggedWords *[]FlaggedWord, keywords *[]HtmlText) float64 {
+// calculate a rating for a given link based on how well its keywords match our flagged words
+func calcLinkRating(flaggedWords *[]FlaggedWord, keywords *[]HtmlText) float64 {
+	const flagPriorityVsKeywordVisibility = 2
+
 	var rating float64
 
 	for i := range *keywords {
 		for j := range *flaggedWords {
 			if strings.Contains((*keywords)[i].Text, (*flaggedWords)[j].Word) {
-				rating += float64((*keywords)[i].Visibility) * float64(10*(*flaggedWords)[j].Priority)
+				rating += float64((*keywords)[i].Visibility) * float64(flagPriorityVsKeywordVisibility*(*flaggedWords)[j].Priority)
 			}
 		}
 	}
@@ -108,8 +122,12 @@ func checkForFlaggedWords(flaggedWords *[]FlaggedWord, keywords *[]HtmlText) flo
 	return rating
 }
 
+///////////////////////////////
+// Load certain config files
+///////////////////////////////
+
 func loadFlaggedWords() *[]FlaggedWord {
-	const filename = "flaggedWords.csv"
+	const filename = "config/flaggedWords.csv"
 
 	flaggedWords := make([]FlaggedWord, 0)
 
@@ -133,7 +151,7 @@ func loadFlaggedWords() *[]FlaggedWord {
 }
 
 func addStartSites(out chan *Link) {
-	const filename = "links.txt"
+	const filename = "config/links.txt"
 
 	f, err := os.Open(filename)
 	check(err)
@@ -148,42 +166,4 @@ func addStartSites(out chan *Link) {
 	}
 
 	check(scanner.Err())
-}
-
-func loadInterestingDomainsList() *map[string]bool {
-	const filename = "interestingDomains.txt"
-	interestingDomains := make(map[string]bool)
-
-	f, err := os.Open(filename)
-	check(err)
-	defer f.Close()
-
-	scanner := bufio.NewScanner(f)
-
-	for scanner.Scan() {
-		interestingDomains[scanner.Text()] = true
-	}
-
-	check(scanner.Err())
-
-	return &interestingDomains
-}
-
-func loadBoringDomainsList() *map[string]bool {
-	const filename = "top-1000-websites.txt"
-	boringDomains := make(map[string]bool)
-
-	f, err := os.Open(filename)
-	check(err)
-	defer f.Close()
-
-	scanner := bufio.NewScanner(f)
-
-	for scanner.Scan() {
-		boringDomains[scanner.Text()] = true
-	}
-
-	check(scanner.Err())
-
-	return &boringDomains
 }

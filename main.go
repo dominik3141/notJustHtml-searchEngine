@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/sha1"
 	"crypto/sha512"
 	"flag"
 	"log"
@@ -21,11 +22,12 @@ type HtmlText struct {
 }
 
 type Link struct {
-	TimeFound       time.Time
-	OrigUrl         *url.URL
-	DestUrl         *url.URL
-	SurroundingNode []byte
-	Keywords        *[]HtmlText
+	TimeFound time.Time
+	OrigUrl   *url.URL
+	DestUrl   *url.URL
+	Keywords  *[]HtmlText
+	Rating    float64
+	Priority  int
 }
 
 type LinkRel struct {
@@ -34,6 +36,7 @@ type LinkRel struct {
 	Origin      int64
 	Destination int64
 	Keywords    []HtmlText
+	Rating      float64
 }
 
 type Site struct {
@@ -49,6 +52,7 @@ type Content struct {
 	HttpStatusCode int
 	Size           int
 	Sha512Sum      *[sha512.Size]byte
+	Sha1Sum        *[sha1.Size]byte
 }
 
 type Errors struct {
@@ -73,6 +77,7 @@ var sitesIndexed int
 var db *bun.DB
 var rdb *redis.Client
 var contentTypeToIdCache sync.Map
+var knownDomains sync.Map
 
 func main() {
 	// create a channel to receive certain syscalls
@@ -80,7 +85,7 @@ func main() {
 
 	// parse command line arguments
 	dbPath := flag.String("dbPath", "testDbxxx.sqlite", "Path to the database")
-	numOfRoutines := flag.Int("n", 3, "Number of crawlers to run in parralel")
+	numOfRoutines := flag.Int("n", 3, "Number of crawlers to run in parallel")
 	flag.Parse()
 
 	// get database clients
@@ -90,13 +95,14 @@ func main() {
 	defer db.Close()
 
 	// create channels
-	linksChan := make(chan *Link, 1e2) // extractFromPage -> saveNewLink
-	newUrls := make(chan *Link, 1e2)   // saveNewLink -> handleQueue
+	linksChan := make(chan *Link, 1e3) // extractFromPage -> saveNewLink
+	newUrls := make(chan *Link, 1e3)   // saveNewLink -> handleQueue
 
+	// load the list of flaggedWords
 	flaggedWords := loadFlaggedWords()
 
 	// start queueWorker
-	go addToQueue(newUrls, flaggedWords)
+	go addToQueue(newUrls)
 
 	// add to startSites
 	addStartSites(newUrls)
@@ -106,18 +112,18 @@ func main() {
 	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT)
 
 	// start goroutines
-	go extractFromPage(linksChan, "QueuePriority100")
-	go extractFromPage(linksChan, "QueuePriority80")
-	go extractFromPage(linksChan, "QueuePriority70")
-	go extractFromPage(linksChan, "QueuePriority50")
-	go extractFromPage(linksChan, "QueuePriority30")
 	for i := 1; i <= *numOfRoutines; i++ {
-		go saveNewLink(linksChan, newUrls)
+		go saveNewLink(linksChan, newUrls, flaggedWords)
+		go saveNewLink(linksChan, newUrls, flaggedWords)
+		go saveNewLink(linksChan, newUrls, flaggedWords)
 		go extractFromPage(linksChan, "QueuePriority20")
+		go extractFromPage(linksChan, "QueuePriority30")
 		go extractFromPage(linksChan, "QueuePriority70")
+		go extractFromPage(linksChan, "QueuePriority100")
+		go extractFromPage(linksChan, "QueuePriority100")
 	}
 
-	// print a staus update every two seconds
+	// print a status update every two seconds
 	for {
 		time.Sleep(2 * time.Second)
 

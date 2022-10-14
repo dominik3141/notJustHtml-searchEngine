@@ -8,6 +8,46 @@ import (
 	"golang.org/x/net/html"
 )
 
+// gets all links starting at a given html node
+// all found links are send to a go channel
+func getAllLinks(originUrl *url.URL, node *html.Node, links chan<- *Link) {
+	extractLink := func(c *html.Node) {
+		for _, a := range c.Attr {
+			if a.Key == "href" || a.Key == "src" {
+				linkDst, err := url.Parse(a.Val)
+				if err != nil {
+					break
+				}
+
+				// correct urls that do not contain a hostname
+				if linkDst.Hostname() == "" {
+					linkDst.Host = originUrl.Host
+					linkDst.Scheme = originUrl.Scheme
+				}
+
+				reducedNode := reduceHtmlNode(c)
+				keywords := extractKeywords(reducedNode, 1)
+
+				link := Link{
+					TimeFound: time.Now(),
+					OrigUrl:   originUrl,
+					DestUrl:   linkDst,
+					Keywords:  &keywords,
+				}
+
+				links <- &link
+			}
+		}
+	}
+
+	for c := node; c != nil; c = c.NextSibling {
+		extractLink(c)
+		if c.FirstChild != nil {
+			getAllLinks(originUrl, c.FirstChild, links)
+		}
+	}
+}
+
 type ReducedHtmlNode struct {
 	Type   html.NodeType
 	Data   string
@@ -45,51 +85,6 @@ func reduceHtmlNode(node *html.Node) *ReducedHtmlNode {
 	ret := reduce(node)
 	ret.Childs = getChilds(node)
 	return ret
-}
-
-// gets all links starting at a given html node
-// all found links are send to a go channel
-func getAllLinks(originUrl *url.URL, node *html.Node, links chan<- *Link) {
-	extractLink := func(c *html.Node) {
-		for _, a := range c.Attr {
-			if a.Key == "href" || a.Key == "src" {
-				linkDst, err := url.Parse(a.Val)
-				if err != nil {
-					// log.Println("Malformed url:", a.Val)
-					break
-				}
-
-				if linkDst.Hostname() == "" {
-					linkDst.Host = originUrl.Host
-					linkDst.Scheme = originUrl.Scheme
-					// log.Printf("Corrected url from %v to %v", a.Val, linkDst.String())
-				}
-
-				// jsonNode, err := json.MarshalIndent(reduceHtmlNode(c), "", "\t")
-				reducedNode := reduceHtmlNode(c)
-				// jsonNode, err := json.Marshal(reducedNode)
-				// check(err)
-				keywords := extractKeywords(reducedNode, 1)
-
-				link := Link{
-					TimeFound: time.Now(),
-					OrigUrl:   originUrl,
-					DestUrl:   linkDst,
-					// SurroundingNode: jsonNode,
-					Keywords: &keywords,
-				}
-
-				links <- &link
-			}
-		}
-	}
-
-	for c := node; c != nil; c = c.NextSibling {
-		extractLink(c)
-		if c.FirstChild != nil {
-			getAllLinks(originUrl, c.FirstChild, links)
-		}
-	}
 }
 
 // search the child nodes of a html link node for a text node
