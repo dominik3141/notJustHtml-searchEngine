@@ -53,6 +53,10 @@ func getDb() *bun.DB {
 		check(err)
 		_, err = db.NewCreateTable().Model(&LinkKeywordRel{}).Exec(context.Background())
 		check(err)
+		_, err = db.NewCreateTable().Model(&ExifInfo{}).Exec(context.Background())
+		check(err)
+		_, err = db.NewCreateTable().Model(&PerceptualHash{}).Exec(context.Background())
+		check(err)
 	}
 
 	return db

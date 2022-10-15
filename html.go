@@ -37,7 +37,7 @@ func extractFromPage(outChan chan<- *Link, queueName string) {
 		// GET the url
 		resp, err := http.Get(url.String())
 		if err != nil {
-			log.Printf("URL: %v. html get error. err=%v", url.String(), err)
+			// log.Printf("URL: %v. html get error. err=%v", url.String(), err)
 			dbErr := Errors{Url: url.String(), Time: time.Now()}
 			if resp != nil {
 				dbErr.HttpStatusCode = resp.StatusCode
@@ -97,17 +97,20 @@ func extractFromPage(outChan chan<- *Link, queueName string) {
 		sha1SumUrlBase64 := base64.URLEncoding.EncodeToString(sha1Sum[:])
 		sha1SumUrlBase64 = sha1SumUrlBase64[:20]
 
-		var aHash uint64
+		var percHashes *PerceptualHash
+		var exif *ExifInfo
 		err = nil
 		switch contentTypeStr {
 		case "text/html":
 		case "text/javascript":
 		case "image/png":
 			saveToFile(sha1SumUrlBase64+".png", &body)
-			aHash, err = calcAvgHash(contentTypeStr, bytes.NewReader(body))
+			percHashes, _ = calcPercptualHashes(contentTypeStr, bytes.NewReader(body))
+			exif = getExif(bytes.NewReader(body), url.String())
 		case "image/jpeg":
 			saveToFile(sha1SumUrlBase64+".jpg", &body)
-			aHash, err = calcAvgHash(contentTypeStr, bytes.NewReader(body))
+			percHashes, _ = calcPercptualHashes(contentTypeStr, bytes.NewReader(body))
+			exif = getExif(bytes.NewReader(body), url.String())
 		case "application/x-gzip":
 			saveToFile(sha1SumUrlBase64+".gz", &body)
 		case "text/plain":
@@ -135,10 +138,6 @@ func extractFromPage(outChan chan<- *Link, queueName string) {
 		case " application/excel":
 			saveToFile(sha1SumUrlBase64+".xls", &body)
 		}
-		if err != nil {
-			log.Printf("URL %v. Error calculation perceptual hash. Err=%v", url.String(), err)
-			aHash = 0
-		}
 
 		content := Content{
 			TimeFound:      time.Now().UnixMicro(),
@@ -148,10 +147,25 @@ func extractFromPage(outChan chan<- *Link, queueName string) {
 			Size:           n,
 			Sha512Sum:      &sha512Sum,
 			Sha1Sum:        &sha1Sum,
-			AverageHash:    aHash,
 		}
-		_, err = db.NewInsert().Model(&content).Exec(context.Background())
+		result, err := db.NewInsert().Model(&content).Exec(context.Background())
 		handleBunSqlErr(err)
+		contentId, err := result.LastInsertId()
+		handleBunSqlErr(err)
+
+		// insert exif information to database
+		if exif != nil {
+			exif.ContentId = contentId
+			_, err = db.NewInsert().Model(exif).Exec(context.Background())
+			handleBunSqlErr(err)
+		}
+
+		// insert perceptual hashes to the database
+		if percHashes != nil {
+			percHashes.ContentId = contentId
+			_, err = db.NewInsert().Model(percHashes).Exec(context.Background())
+			handleBunSqlErr(err)
+		}
 
 		// check if content type is html, otherwise the file can not be searched for links
 		if len(contentTypeStr) >= 8 && contentTypeStr[:9] != "text/html" {

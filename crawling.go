@@ -10,12 +10,12 @@ import (
 	"os"
 	"strconv"
 	"strings"
-
-	"github.com/bits-and-blooms/bloom/v3"
 )
 
 func saveNewLink(inChan <-chan *Link, outChan chan<- *Link, flaggedWords *[]FlaggedWord) {
 	var rating float64
+	var linkId int64
+
 	calcLinkPriority := func(link *Link) int {
 		url := link.DestUrl
 		urlStr := strings.ToLower(url.String())
@@ -34,7 +34,7 @@ func saveNewLink(inChan <-chan *Link, outChan chan<- *Link, flaggedWords *[]Flag
 			return 30
 		}
 
-		return 0
+		return 20
 	}
 
 	for {
@@ -64,14 +64,16 @@ func saveNewLink(inChan <-chan *Link, outChan chan<- *Link, flaggedWords *[]Flag
 		}
 
 		// add link to database
-		_, err := db.NewInsert().Model(linkRel).Exec(context.Background())
+		result, err := db.NewInsert().Model(linkRel).Exec(context.Background())
 		handleBunSqlErr(err)
+		linkId, err = result.LastInsertId()
+		check(err)
 
 		// save the keywords in the database
 		for i := range *link.Keywords {
 			keyword := &LinkKeywordRel{
-				// LinkId:     getLinkID(link),
-				SiteId:     getSiteID(link.DestUrl.String()),
+				LinkId: linkId,
+				// SiteId:     getSiteID(link.DestUrl.String()),
 				Visibility: (*link.Keywords)[i].Visibility,
 				Text:       (*link.Keywords)[i].Text,
 			}
@@ -86,7 +88,6 @@ func saveNewLink(inChan <-chan *Link, outChan chan<- *Link, flaggedWords *[]Flag
 
 // add a link to a queue depending on the links rating and priority
 func addToQueue(queueIn chan *Link) {
-	filter := bloom.NewWithEstimates(maxNumOfUrls, 0.01)
 	var err error
 	var queueName string
 
@@ -94,8 +95,8 @@ func addToQueue(queueIn chan *Link) {
 		// get the next url from the channel
 		link := <-queueIn
 
-		// check if the url has been indexed before
-		if filter.Test([]byte(link.DestUrl.String())) {
+		// check if the url has been indexed before, if not, add it to the filter
+		if bloomFilter.TestOrAdd([]byte(link.DestUrl.String())) {
 			continue
 		}
 
@@ -110,9 +111,6 @@ func addToQueue(queueIn chan *Link) {
 
 		// increase the counter for indexed sites
 		sitesIndexed++
-
-		// add url to the bloom filter of known urls
-		filter.Add([]byte(link.DestUrl.String()))
 	}
 }
 

@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/bits-and-blooms/bloom/v3"
 	"github.com/go-redis/redis"
 	"github.com/uptrace/bun"
 )
@@ -41,7 +42,6 @@ type LinkRel struct {
 type LinkKeywordRel struct {
 	ID         int64 `bun:",pk,autoincrement"`
 	LinkId     int64
-	SiteId     int64 // temporary because we can not figure out the link id effciently yet
 	Visibility int
 	Text       string
 }
@@ -60,7 +60,23 @@ type Content struct {
 	Size           int
 	Sha512Sum      *[sha512.Size]byte
 	Sha1Sum        *[sha1.Size]byte
-	AverageHash    uint64 // a perceptual hash
+}
+
+type PerceptualHash struct {
+	ID             int64 `bun:",pk,autoincrement"`
+	ContentId      int64
+	AverageHash    uint64
+	DifferenceHash uint64
+	PerceptionHash uint64
+}
+
+type ExifInfo struct {
+	ID        int64 `bun:",pk,autoincrement"`
+	ContentId int64
+	Camera    string
+	Timestamp int64 // as UnixMicro
+	Lat       float64
+	Long      float64
 }
 
 type Errors struct {
@@ -85,6 +101,7 @@ var db *bun.DB
 var rdb *redis.Client
 var contentTypeToIdCache sync.Map
 var knownDomains sync.Map
+var bloomFilter *bloom.BloomFilter
 
 func main() {
 	// create a channel to receive certain syscalls
@@ -94,11 +111,12 @@ func main() {
 	numOfRoutines := flag.Int("n", 3, "Number of crawlers to run in parallel")
 	flag.Parse()
 
+	// create a new bloom filter
+	bloomFilter = bloom.NewWithEstimates(maxNumOfUrls, 0.01)
+
 	// get database clients
 	rdb = getRedisClient()
-	defer rdb.Close()
 	db = getDb()
-	defer db.Close()
 
 	// create channels
 	linksChan := make(chan *Link, 1e3) // extractFromPage -> saveNewLink
@@ -123,17 +141,20 @@ func main() {
 		go saveNewLink(linksChan, newUrls, flaggedWords)
 		go saveNewLink(linksChan, newUrls, flaggedWords)
 		go saveNewLink(linksChan, newUrls, flaggedWords)
-		// go extractFromPage(linksChan, "QueuePriority20")
-		go extractFromPage(linksChan, "QueuePriority30")
+		go saveNewLink(linksChan, newUrls, flaggedWords)
+		go saveNewLink(linksChan, newUrls, flaggedWords)
+		go extractFromPage(linksChan, "QueuePriority90")
+		go extractFromPage(linksChan, "QueuePriority90")
 		go extractFromPage(linksChan, "QueuePriority70")
 		go extractFromPage(linksChan, "QueuePriority70")
-		go extractFromPage(linksChan, "QueuePriority100")
+		go extractFromPage(linksChan, "QueuePriority90")
+		go extractFromPage(linksChan, "QueuePriority90")
 		go extractFromPage(linksChan, "QueuePriority90")
 	}
 
 	// print a status update every two seconds
 	for {
-		time.Sleep(2 * time.Second)
+		time.Sleep(5 * time.Second)
 
 		log.Printf("Visited %v links", sitesIndexed)
 	}
@@ -143,9 +164,17 @@ func handleSigTerm(sig chan os.Signal) {
 	received := <-sig
 	log.Printf("Received signal %v", received)
 
-	log.Printf("Locking database in order to close it")
-	log.Printf("Database locked")
-	db.Close()
+	time.Sleep(2 * time.Second)
+
+	log.Printf("Closing database...")
+	err := db.Close()
+	if err != nil {
+		log.Println("Error closing database")
+	}
+	err = rdb.Close()
+	if err != nil {
+		log.Println("Error closing redis database")
+	}
 	log.Printf("Database closed")
 
 	os.Exit(0)

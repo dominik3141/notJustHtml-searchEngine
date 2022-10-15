@@ -20,6 +20,7 @@ require (
 	github.com/go-redis/redis v6.15.9+incompatible
 	github.com/icza/gox v0.0.0-20220921190100-610a6663952b
 	github.com/jinzhu/inflection v1.0.0 // indirect
+	github.com/rwcarlsen/goexif v0.0.0-20190401172101-9e8deecbddbd
 	github.com/tmthrgd/go-hex v0.0.0-20190904060850-447a3041c3bc // indirect
 	github.com/uptrace/bun v1.1.8
 	github.com/uptrace/bun/dialect/pgdialect v1.1.8
