@@ -2,11 +2,8 @@ package main
 
 import (
 	"context"
-	"crypto/sha1"
-	"crypto/sha512"
 	"flag"
 	"log"
-	"net/url"
 	"os"
 	"os/signal"
 	"sync"
@@ -16,92 +13,6 @@ import (
 	"github.com/bits-and-blooms/bloom/v3"
 	"github.com/go-redis/redis"
 	"github.com/uptrace/bun"
-)
-
-type HtmlText struct {
-	Visibility int
-	Text       string
-}
-
-type Link struct {
-	TimeFound time.Time
-	OrigUrl   *url.URL
-	DestUrl   *url.URL
-	Keywords  *[]HtmlText
-	Rating    float64
-	Priority  int
-}
-
-type LinkRel struct {
-	ID          int64 `bun:",pk,autoincrement"`
-	TimeFound   int64
-	Origin      int64
-	Destination int64
-	Rating      float64
-}
-
-type LinkKeywordRel struct {
-	ID         int64 `bun:",pk,autoincrement"`
-	LinkId     int64
-	Visibility int
-	Text       string
-}
-
-type Site struct {
-	ID  int64 `bun:",pk,autoincrement"`
-	Url string
-}
-
-type Content struct {
-	ID             int64 `bun:",pk,autoincrement"`
-	TimeFound      int64
-	SiteID         int64
-	ContentTypeId  int64
-	HttpStatusCode int
-	Size           int
-	Sha512Sum      *[sha512.Size]byte
-	Sha1Sum        *[sha1.Size]byte
-}
-
-type PerceptualHash struct {
-	ID             int64 `bun:",pk,autoincrement"`
-	ContentId      int64
-	AverageHash    uint64
-	DifferenceHash uint64
-	PerceptionHash uint64
-}
-
-type ExifInfo struct {
-	ID        int64 `bun:",pk,autoincrement"`
-	ContentId int64
-	Camera    string
-	Timestamp int64 // as UnixMicro
-	Lat       float64
-	Long      float64
-}
-
-type Errors struct {
-	ID             int64 `bun:",pk,autoincrement"`
-	Time           time.Time
-	Url            string
-	HttpStatusCode int
-	// ParsingError            bool
-	// ResponseToBig           bool
-	// ErrorReading            bool
-	// ResponseSizeUneqContLen bool
-	ErrorCode ErrorCode
-	ErrorText string
-}
-
-type ErrorCode int
-
-const (
-	ErrorParsingHtml ErrorCode = iota
-	ErrorResponseToBig
-	ErrorReading
-	ErrorResponseSizeUneqContLen
-	ErrorReadExif
-	ErrorPerceptualHash
 )
 
 const (
@@ -206,22 +117,4 @@ func handleSigTerm(sig chan os.Signal) {
 	log.Printf("Database closed")
 
 	os.Exit(0)
-}
-
-func check(err error) {
-	if err != nil {
-		panic(err)
-	}
-}
-
-func handleBunSqlErr(err error) {
-	if err != nil {
-		panic(err)
-	}
-}
-
-func checkRedisErr(err error) {
-	if err != redis.Nil && err != nil {
-		panic(err)
-	}
 }
