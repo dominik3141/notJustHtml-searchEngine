@@ -6,6 +6,7 @@ import (
 	"crypto/sha1"
 	"crypto/sha512"
 	"encoding/base64"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -15,16 +16,20 @@ import (
 	"golang.org/x/net/html"
 )
 
-func extractFromPage(outChan chan<- *Link, queueName string) {
+func extractFromPage(outChan chan<- *Link, qPriority int) {
 	body := make([]byte, maxFilesize)
 	var n int
+	var rawUrl string
+	var err error
 
 	for {
-		rawUrl, err := rdb.SPop(queueName).Result()
-		checkRedisErr(err)
-		if rawUrl == "" {
-			time.Sleep(time.Second)
-			continue
+		for {
+			rawUrl, err = rdb.SPop(fmt.Sprintf("QueuePriority%v", qPriority)).Result()
+			checkRedisErr(err)
+			if rawUrl != "" {
+				break
+			}
+			time.Sleep(2 * time.Second)
 		}
 
 		// parse the url that we want to index
@@ -46,6 +51,7 @@ func extractFromPage(outChan chan<- *Link, queueName string) {
 			handleBunSqlErr(err)
 			continue
 		}
+		defer resp.Body.Close()
 
 		// check if response body is to large for use to handle
 		if resp.ContentLength >= maxFilesize {
@@ -67,22 +73,20 @@ func extractFromPage(outChan chan<- *Link, queueName string) {
 				}
 			}
 		}
-		if err != nil && err != io.EOF {
+		n = len(body)
+		if (err != nil && err != io.EOF) || n == 0 {
 			log.Printf("URL: %v. Error reading response body. err=%v", url.String(), err)
 			dbErr := Errors{Url: url.String(), Time: time.Now(), ErrorReading: true}
 			_, err = db.NewInsert().Model(&dbErr).Exec(context.Background())
 			handleBunSqlErr(err)
 			continue
 		}
-		n = len(body)
 		// check if content length indicated in the http header equals the number of bytes that we did actually read
 		if n != int(resp.ContentLength) && resp.ContentLength != -1 {
 			dbErr := Errors{Url: url.String(), Time: time.Now(), ResponseSizeUneqContLen: true}
 			_, err = db.NewInsert().Model(&dbErr).Exec(context.Background())
 			handleBunSqlErr(err)
 		}
-		err = resp.Body.Close()
-		check(err)
 
 		// Retrieve content information
 		sha512Sum := sha512.Sum512(body)
@@ -95,7 +99,6 @@ func extractFromPage(outChan chan<- *Link, queueName string) {
 		}
 
 		sha1SumUrlBase64 := base64.URLEncoding.EncodeToString(sha1Sum[:])
-		sha1SumUrlBase64 = sha1SumUrlBase64[:20]
 
 		var percHashes *PerceptualHash
 		var exif *ExifInfo
@@ -104,11 +107,11 @@ func extractFromPage(outChan chan<- *Link, queueName string) {
 		case "text/html":
 		case "text/javascript":
 		case "image/png":
-			saveToFile(sha1SumUrlBase64+".png", &body)
+			// saveToFile(sha1SumUrlBase64+".png", &body)
 			percHashes, _ = calcPercptualHashes(contentTypeStr, bytes.NewReader(body))
 			exif = getExif(bytes.NewReader(body), url.String())
 		case "image/jpeg":
-			saveToFile(sha1SumUrlBase64+".jpg", &body)
+			// saveToFile(sha1SumUrlBase64+".jpg", &body)
 			percHashes, _ = calcPercptualHashes(contentTypeStr, bytes.NewReader(body))
 			exif = getExif(bytes.NewReader(body), url.String())
 		case "application/x-gzip":
@@ -148,27 +151,28 @@ func extractFromPage(outChan chan<- *Link, queueName string) {
 			Sha512Sum:      &sha512Sum,
 			Sha1Sum:        &sha1Sum,
 		}
-		result, err := db.NewInsert().Model(&content).Exec(context.Background())
-		handleBunSqlErr(err)
-		contentId, err := result.LastInsertId()
+		_, err = db.NewInsert().Model(&content).Returning("id").Exec(context.Background())
 		handleBunSqlErr(err)
 
 		// insert exif information to database
 		if exif != nil {
-			exif.ContentId = contentId
+			exif.ContentId = content.ID
 			_, err = db.NewInsert().Model(exif).Exec(context.Background())
 			handleBunSqlErr(err)
+			if exif.Lat != 0 {
+				goodDomains.LoadOrStore(url.Hostname(), true)
+			}
 		}
 
 		// insert perceptual hashes to the database
 		if percHashes != nil {
-			percHashes.ContentId = contentId
+			percHashes.ContentId = content.ID
 			_, err = db.NewInsert().Model(percHashes).Exec(context.Background())
 			handleBunSqlErr(err)
 		}
 
 		// check if content type is html, otherwise the file can not be searched for links
-		if len(contentTypeStr) >= 8 && contentTypeStr[:9] != "text/html" {
+		if len(contentTypeStr) >= 9 && contentTypeStr[:9] != "text/html" {
 			continue
 		}
 
@@ -176,7 +180,7 @@ func extractFromPage(outChan chan<- *Link, queueName string) {
 		rootNode, err := html.Parse(bytes.NewReader(body))
 		if err != nil {
 			log.Printf("URL: %v. html parsing error. err=%v", url, err)
-			dbErr := Errors{Url: url.String(), ParsingError: true, Time: time.Now()}
+			dbErr := Errors{Url: url.String(), ErrorCode: ErrorParsingHtml, Time: time.Now()}
 			_, err = db.NewInsert().Model(&dbErr).Exec(context.Background())
 			handleBunSqlErr(err)
 			continue

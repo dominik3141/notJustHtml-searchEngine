@@ -14,7 +14,7 @@ import (
 
 func saveNewLink(inChan <-chan *Link, outChan chan<- *Link, flaggedWords *[]FlaggedWord) {
 	var rating float64
-	var linkId int64
+	var found bool
 
 	calcLinkPriority := func(link *Link) int {
 		url := link.DestUrl
@@ -28,13 +28,18 @@ func saveNewLink(inChan <-chan *Link, outChan chan<- *Link, flaggedWords *[]Flag
 			return 90
 		}
 
+		_, found = goodDomains.Load(link.DestUrl.Hostname())
+		if found {
+			return 70
+		}
+
 		// check if domain has been discovered before
 		_, isKnown := knownDomains.LoadOrStore(url.Hostname(), true)
 		if !isKnown {
-			return 30
+			return 60
 		}
 
-		return 20
+		return 50
 	}
 
 	for {
@@ -59,20 +64,18 @@ func saveNewLink(inChan <-chan *Link, outChan chan<- *Link, flaggedWords *[]Flag
 		link.Priority = calcLinkPriority(link)
 
 		// overwrite link priority if link rating is high enough
-		if link.Rating > 1 && link.Priority < 100 {
-			link.Priority = 70
+		if link.Rating > 20 && link.Priority < 100 {
+			link.Priority = 80
 		}
 
 		// add link to database
-		result, err := db.NewInsert().Model(linkRel).Exec(context.Background())
+		_, err := db.NewInsert().Model(linkRel).Returning("id").Exec(context.Background())
 		handleBunSqlErr(err)
-		linkId, err = result.LastInsertId()
-		check(err)
 
 		// save the keywords in the database
 		for i := range *link.Keywords {
 			keyword := &LinkKeywordRel{
-				LinkId: linkId,
+				LinkId: linkRel.ID,
 				// SiteId:     getSiteID(link.DestUrl.String()),
 				Visibility: (*link.Keywords)[i].Visibility,
 				Text:       (*link.Keywords)[i].Text,
@@ -96,7 +99,7 @@ func addToQueue(queueIn chan *Link) {
 		link := <-queueIn
 
 		// check if the url has been indexed before, if not, add it to the filter
-		if bloomFilter.TestOrAdd([]byte(link.DestUrl.String())) {
+		if knownUrlsFilter.TestOrAdd([]byte(link.DestUrl.String())) {
 			continue
 		}
 
@@ -176,7 +179,7 @@ func addStartSites(out chan *Link) {
 	for scanner.Scan() {
 		url, err := url.Parse(scanner.Text())
 		check(err)
-		out <- &Link{DestUrl: url, Priority: 30}
+		out <- &Link{DestUrl: url, Priority: 60}
 	}
 
 	check(scanner.Err())

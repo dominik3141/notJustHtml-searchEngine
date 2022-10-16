@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/sha1"
 	"crypto/sha512"
 	"flag"
@@ -80,15 +81,28 @@ type ExifInfo struct {
 }
 
 type Errors struct {
-	ID                      int64 `bun:",pk,autoincrement"`
-	Time                    time.Time
-	Url                     string
-	ParsingError            bool
-	ResponseToBig           bool
-	ErrorReading            bool
-	ResponseSizeUneqContLen bool
-	HttpStatusCode          int
+	ID             int64 `bun:",pk,autoincrement"`
+	Time           time.Time
+	Url            string
+	HttpStatusCode int
+	// ParsingError            bool
+	// ResponseToBig           bool
+	// ErrorReading            bool
+	// ResponseSizeUneqContLen bool
+	ErrorCode ErrorCode
+	ErrorText string
 }
+
+type ErrorCode int
+
+const (
+	ErrorParsingHtml ErrorCode = iota
+	ErrorResponseToBig
+	ErrorReading
+	ErrorResponseSizeUneqContLen
+	ErrorReadExif
+	ErrorPerceptualHash
+)
 
 const (
 	createNewDb  = false
@@ -101,7 +115,8 @@ var db *bun.DB
 var rdb *redis.Client
 var contentTypeToIdCache sync.Map
 var knownDomains sync.Map
-var bloomFilter *bloom.BloomFilter
+var goodDomains sync.Map
+var knownUrlsFilter *bloom.BloomFilter
 
 func main() {
 	// create a channel to receive certain syscalls
@@ -111,12 +126,14 @@ func main() {
 	numOfRoutines := flag.Int("n", 3, "Number of crawlers to run in parallel")
 	flag.Parse()
 
-	// create a new bloom filter
-	bloomFilter = bloom.NewWithEstimates(maxNumOfUrls, 0.01)
-
 	// get database clients
 	rdb = getRedisClient()
 	db = getDb()
+
+	// create a new bloom filter
+	knownUrlsFilter = bloom.NewWithEstimates(maxNumOfUrls, 0.01)
+	// add urls from database to filter
+	initBloom(db, knownUrlsFilter)
 
 	// create channels
 	linksChan := make(chan *Link, 1e3) // extractFromPage -> saveNewLink
@@ -124,9 +141,6 @@ func main() {
 
 	// load the list of flaggedWords
 	flaggedWords := loadFlaggedWords()
-
-	// start queueWorker
-	go addToQueue(newUrls)
 
 	// add to startSites
 	addStartSites(newUrls)
@@ -138,18 +152,20 @@ func main() {
 	// start goroutines
 	for i := 1; i <= *numOfRoutines; i++ {
 		go addToQueue(newUrls)
+		go addToQueue(newUrls)
 		go saveNewLink(linksChan, newUrls, flaggedWords)
 		go saveNewLink(linksChan, newUrls, flaggedWords)
 		go saveNewLink(linksChan, newUrls, flaggedWords)
 		go saveNewLink(linksChan, newUrls, flaggedWords)
 		go saveNewLink(linksChan, newUrls, flaggedWords)
-		go extractFromPage(linksChan, "QueuePriority90")
-		go extractFromPage(linksChan, "QueuePriority90")
-		go extractFromPage(linksChan, "QueuePriority70")
-		go extractFromPage(linksChan, "QueuePriority70")
-		go extractFromPage(linksChan, "QueuePriority90")
-		go extractFromPage(linksChan, "QueuePriority90")
-		go extractFromPage(linksChan, "QueuePriority90")
+		go extractFromPage(linksChan, 90)
+		go extractFromPage(linksChan, 80)
+		go extractFromPage(linksChan, 70)
+		go extractFromPage(linksChan, 60)
+		go extractFromPage(linksChan, 50)
+		go extractFromPage(linksChan, 50)
+		go extractFromPage(linksChan, 50)
+		go extractFromPage(linksChan, 50)
 	}
 
 	// print a status update every two seconds
@@ -157,6 +173,18 @@ func main() {
 		time.Sleep(5 * time.Second)
 
 		log.Printf("Visited %v links", sitesIndexed)
+	}
+}
+
+func initBloom(db *bun.DB, filter *bloom.BloomFilter) {
+	sites := make([]Site, 0, 4096)
+	// urls := new([]Site)
+	err := db.NewSelect().Model(&Site{}).Scan(context.Background(), &sites)
+	handleBunSqlErr(err)
+	log.Printf("Adding %v urls to the bloom filter", len(sites))
+
+	for i := range sites {
+		filter.Add([]byte(sites[i].Url))
 	}
 }
 
