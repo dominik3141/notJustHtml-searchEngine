@@ -8,7 +8,6 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"time"
@@ -35,30 +34,21 @@ func extractFromPage(outChan chan<- *Link, qPriority int) {
 		// parse the url that we want to index
 		url, err := url.Parse(rawUrl)
 		if err != nil {
-			log.Printf("URL: %v. Url parsing error. err=%v", rawUrl, err)
+			logErrorToDb(err, ErrorParsingUrl, rawUrl)
 			continue
 		}
 
 		// GET the url
 		resp, err := http.Get(url.String())
 		if err != nil {
-			// log.Printf("URL: %v. html get error. err=%v", url.String(), err)
-			dbErr := Errors{Url: url.String(), Time: time.Now()}
-			if resp != nil {
-				dbErr.HttpStatusCode = resp.StatusCode
-			}
-			_, err = db.NewInsert().Model(&dbErr).Exec(context.Background())
-			handleBunSqlErr(err)
+			logErrorToDb(err, ErrorUrlGet, url.String())
 			continue
 		}
 		defer resp.Body.Close()
 
 		// check if response body is to large for use to handle
 		if resp.ContentLength >= maxFilesize {
-			log.Printf("URL: %v. Webpage is to big.", url.String())
-			dbErr := Errors{Url: url.String(), Time: time.Now(), ResponseToBig: true}
-			_, err = db.NewInsert().Model(&dbErr).Exec(context.Background())
-			handleBunSqlErr(err)
+			logErrorToDb(err, ErrorResponseToBig, url.String())
 			continue
 		}
 
@@ -68,24 +58,24 @@ func extractFromPage(outChan chan<- *Link, qPriority int) {
 			n, err = resp.Body.Read(body[len(body):cap(body)])
 			body = body[:len(body)+n]
 			if err != nil {
-				if err == io.EOF {
-					break
-				}
+				break
 			}
 		}
 		n = len(body)
-		if (err != nil && err != io.EOF) || n == 0 {
-			log.Printf("URL: %v. Error reading response body. err=%v", url.String(), err)
-			dbErr := Errors{Url: url.String(), Time: time.Now(), ErrorReading: true}
-			_, err = db.NewInsert().Model(&dbErr).Exec(context.Background())
-			handleBunSqlErr(err)
+
+		// handle body read errors
+		if err != nil && err != io.EOF {
+			logErrorToDb(err, ErrorReadingBody, url.String())
 			continue
 		}
+		if n == 0 {
+			logErrorToDb(nil, ErrorBodyLenZero, url.String())
+			continue
+		}
+
 		// check if content length indicated in the http header equals the number of bytes that we did actually read
 		if n != int(resp.ContentLength) && resp.ContentLength != -1 {
-			dbErr := Errors{Url: url.String(), Time: time.Now(), ResponseSizeUneqContLen: true}
-			_, err = db.NewInsert().Model(&dbErr).Exec(context.Background())
-			handleBunSqlErr(err)
+			logErrorToDb(err, ErrorResponseSizeUneqContLen, url.String())
 		}
 
 		// Retrieve content information
@@ -108,11 +98,11 @@ func extractFromPage(outChan chan<- *Link, qPriority int) {
 		case "text/javascript":
 		case "image/png":
 			// saveToFile(sha1SumUrlBase64+".png", &body)
-			percHashes, _ = calcPercptualHashes(contentTypeStr, bytes.NewReader(body))
+			percHashes = calcPercptualHashes(contentTypeStr, bytes.NewReader(body), url.String())
 			exif = getExif(bytes.NewReader(body), url.String())
 		case "image/jpeg":
 			// saveToFile(sha1SumUrlBase64+".jpg", &body)
-			percHashes, _ = calcPercptualHashes(contentTypeStr, bytes.NewReader(body))
+			percHashes = calcPercptualHashes(contentTypeStr, bytes.NewReader(body), url.String())
 			exif = getExif(bytes.NewReader(body), url.String())
 		case "application/x-gzip":
 			saveToFile(sha1SumUrlBase64+".gz", &body)
@@ -179,10 +169,7 @@ func extractFromPage(outChan chan<- *Link, qPriority int) {
 		// parse html
 		rootNode, err := html.Parse(bytes.NewReader(body))
 		if err != nil {
-			log.Printf("URL: %v. html parsing error. err=%v", url, err)
-			dbErr := Errors{Url: url.String(), ErrorCode: ErrorParsingHtml, Time: time.Now()}
-			_, err = db.NewInsert().Model(&dbErr).Exec(context.Background())
-			handleBunSqlErr(err)
+			logErrorToDb(err, ErrorParsingHtml, url.String())
 			continue
 		}
 

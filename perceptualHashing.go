@@ -11,7 +11,7 @@ import (
 	"github.com/rwcarlsen/goexif/exif"
 )
 
-func calcPercptualHashes(mimeType string, file io.Reader) (*PerceptualHash, error) {
+func calcPercptualHashes(mimeType string, file io.Reader, urlStr string) *PerceptualHash {
 	var err error
 	var img image.Image
 
@@ -21,35 +21,40 @@ func calcPercptualHashes(mimeType string, file io.Reader) (*PerceptualHash, erro
 	case "image/png":
 		img, err = png.Decode(file)
 	default:
-		return nil, errors.New("unknown mime-type")
+		err = errors.New("unknown mime-type")
 	}
 	if err != nil {
-		return nil, err
+		logErrorToDb(err, ErrorPerceptualHash, urlStr)
+		return nil
 	}
 
 	hashes := new(PerceptualHash)
 
 	hash, err := goimagehash.AverageHash(img)
-	if err == nil {
-		hashes.AverageHash = hash.GetHash()
+	if err != nil {
+		logErrorToDb(err, ErrorPerceptualHash, urlStr)
 	}
+	hashes.AverageHash = hash.GetHash()
 
 	hash, err = goimagehash.DifferenceHash(img)
-	if err == nil {
-		hashes.DifferenceHash = hash.GetHash()
+	if err != nil {
+		logErrorToDb(err, ErrorPerceptualHash, urlStr)
 	}
+	hashes.DifferenceHash = hash.GetHash()
 
 	hash, err = goimagehash.PerceptionHash(img)
-	if err == nil {
-		hashes.PerceptionHash = hash.GetHash()
+	if err != nil {
+		logErrorToDb(err, ErrorPerceptualHash, urlStr)
 	}
+	hashes.PerceptionHash = hash.GetHash()
 
-	return hashes, nil
+	return hashes
 }
 
-func getExif(file io.Reader, url string) *ExifInfo {
+func getExif(file io.Reader, urlStr string) *ExifInfo {
 	x, err := exif.Decode(file)
 	if err != nil {
+		logErrorToDb(err, ErrorReadExif, urlStr)
 		return nil
 	}
 
@@ -60,17 +65,30 @@ func getExif(file io.Reader, url string) *ExifInfo {
 		camModelStr, err := camModel.StringVal()
 		if err == nil {
 			ret.Camera = camModelStr
+		} else {
+			logErrorToDb(err, ErrorReadExif, urlStr)
 		}
+	} else {
+		logErrorToDb(err, ErrorReadExif, urlStr)
 	}
 
 	tm, err := x.DateTime()
 	if err == nil {
 		ret.Timestamp = tm.UnixMicro()
+	} else {
+		logErrorToDb(err, ErrorReadExif, urlStr)
 	}
+
 	lat, long, err := x.LatLong()
 	if err == nil {
 		ret.Lat, ret.Long = lat, long
+	} else {
+		logErrorToDb(err, ErrorReadExif, urlStr)
 	}
 
-	return ret
+	if ret.Timestamp == 0 && ret.Camera == "" && ret.Lat == 0 {
+		return nil
+	} else {
+		return ret
+	}
 }

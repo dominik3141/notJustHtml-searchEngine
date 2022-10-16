@@ -28,6 +28,7 @@ var contentTypeToIdCache sync.Map
 var knownDomains sync.Map
 var goodDomains sync.Map
 var knownUrlsFilter *bloom.BloomFilter
+var debugMode bool
 
 func main() {
 	// create a channel to receive certain syscalls
@@ -35,7 +36,9 @@ func main() {
 
 	// parse command line arguments
 	numOfRoutines := flag.Int("n", 3, "Number of crawlers to run in parallel")
+	debugModeP := flag.Bool("debug", false, "Run program in debug mode")
 	flag.Parse()
+	debugMode = *debugModeP
 
 	// get database clients
 	rdb = getRedisClient()

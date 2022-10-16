@@ -16,6 +16,7 @@ func getAllLinks(originUrl *url.URL, node *html.Node, links chan<- *Link) {
 			if a.Key == "href" || a.Key == "src" {
 				linkDst, err := url.Parse(a.Val)
 				if err != nil {
+					logErrorToDb(err, ErrorParsingUrl, a.Val)
 					break
 				}
 
