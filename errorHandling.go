@@ -43,7 +43,9 @@ func logErrorToDb(err error, errCode ErrorCode, url string) {
 		Url:       url,
 		ErrorCode: ErrorParsingHtml,
 		Time:      time.Now(),
-		ErrorText: err.Error(),
+	}
+	if err != nil {
+		dbErr.ErrorText = err.Error()
 	}
 
 	_, err = db.NewInsert().Model(&dbErr).Exec(context.Background())

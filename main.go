@@ -100,6 +100,8 @@ func initBloom(db *bun.DB, filter *bloom.BloomFilter) {
 	for i := range sites {
 		filter.Add([]byte(sites[i].Url))
 	}
+
+	log.Printf("Done adding urls to the bloom filter")
 }
 
 func handleSigTerm(sig chan os.Signal) {

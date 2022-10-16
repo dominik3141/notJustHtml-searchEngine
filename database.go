@@ -128,50 +128,48 @@ func getDb() *bun.DB {
 	return db
 }
 
-func getSiteID(url string) int64 {
-	site := new(Site)
-	var i int
-start:
+func getSiteID(urlStr string) int64 {
+	site := &Site{Url: urlStr}
 
-	id, err := rdb.HGet("SiteIDs", url).Int64()
+	id, err := rdb.HGet("SiteIDs", urlStr).Int64()
 	checkRedisErr(err)
 	site.ID = id
 	if id == 0 {
-		err = db.NewSelect().Model(site).Where("url = ?", url).Scan(context.Background(), site)
+		err = db.NewSelect().Model(site).Where("url = ?", urlStr).Scan(context.Background(), site)
 		if err != nil || site.ID == 0 {
 			// create new site
-			_, err := db.NewInsert().Model(&Site{Url: url}).Exec(context.Background())
+			site.Url = urlStr
+			_, err := db.NewInsert().Model(site).Returning("id").Exec(context.Background())
 			handleBunSqlErr(err)
-			if i > 3 {
-				panic("loop")
-			}
-			i++
-			goto start
 		}
-		err = rdb.HSet("SiteIDs", url, site.ID).Err()
+		if site.ID == 0 {
+			panic("ERROR with siteId")
+		}
+		err = rdb.HSet("SiteIDs", urlStr, site.ID).Err()
 		checkRedisErr(err)
+
+		return site.ID
 	}
 
 	return site.ID
 }
 
 func getContentTypeId(contentTypeStr string) int64 {
-	var i int
 	var id int64
 	var err error
 
-start:
 	val, found := contentTypeToIdCache.Load(contentTypeStr)
 	if !found {
 		err = db.NewSelect().Model(&ContentTypes{}).Column("id").Where("Name = ?", contentTypeStr).Scan(context.Background(), &id)
 		if err != nil || id == 0 {
-			_, err = db.NewInsert().Model(&ContentTypes{Name: contentTypeStr}).Exec(context.Background())
+			cType := &ContentTypes{Name: contentTypeStr}
+			_, err = db.NewInsert().Model(cType).Returning("id").Exec(context.Background())
 			handleBunSqlErr(err)
-			if i > 3 {
-				panic("loop")
+			if cType.ID == 0 {
+				panic("Error returning contentTypeId")
 			}
-			i++
-			goto start
+			contentTypeToIdCache.Store(contentTypeStr, cType.ID)
+			return cType.ID
 		}
 		contentTypeToIdCache.Store(contentTypeStr, id)
 	} else {
