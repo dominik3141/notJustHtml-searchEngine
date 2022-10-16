@@ -108,8 +108,6 @@ func handleSigTerm(sig chan os.Signal) {
 	received := <-sig
 	log.Printf("Received signal %v", received)
 
-	time.Sleep(2 * time.Second)
-
 	log.Printf("Closing database...")
 	err := db.Close()
 	if err != nil {
