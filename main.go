@@ -30,6 +30,7 @@ var goodDomains sync.Map
 var knownUrlsFilter *bloom.BloomFilter
 var debugMode bool
 var useChromedp *bool
+var domainIdCache = make(map[string]int64)
 
 func main() {
 	// create a channel to receive certain syscalls

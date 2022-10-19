@@ -47,9 +47,9 @@ type LinkKeywordRel struct {
 }
 
 type Site struct {
-	ID     int64 `bun:",pk,autoincrement"`
-	Domain string
-	Url    string
+	ID       int64 `bun:",pk,autoincrement"`
+	DomainId int64
+	Url      string
 }
 
 type Content struct {
@@ -83,6 +83,11 @@ type ExifInfo struct {
 type ContentTypes struct {
 	ID   int64 `bun:",pk,autoincrement"`
 	Name string
+}
+
+type Domain struct {
+	ID   int64  `bun:",pk,autoincrement"`
+	Name string `bun:",unique"`
 }
 
 func getRedisClient() *redis.Client {
@@ -124,6 +129,8 @@ func getDb() *bun.DB {
 		check(err)
 		_, err = db.NewCreateTable().Model(&PerceptualHash{}).Exec(context.Background())
 		check(err)
+		_, err := db.NewCreateTable().Model(&Domain{}).Exec(context.Background())
+		check(err)
 	}
 
 	return db
@@ -140,7 +147,7 @@ func getSiteID(urlP *url.URL) int64 {
 		if err != nil || site.ID == 0 {
 			// create new site
 			site.Url = urlP.String()
-			site.Domain = urlP.Hostname()
+			site.DomainId = getDomainId(urlP.Hostname())
 			_, err := db.NewInsert().Model(site).Returning("id").Exec(context.Background())
 			handleBunSqlErr(err)
 		}
@@ -176,6 +183,34 @@ func getContentTypeId(contentTypeStr string) int64 {
 		contentTypeToIdCache.Store(contentTypeStr, id)
 	} else {
 		id = val.(int64)
+	}
+
+	return id
+}
+
+func getDomainId(domain string) int64 {
+	var err error
+	id, found := domainIdCache[domain]
+	if !found {
+		err = db.NewSelect().Model(&Domain{}).Where("name = ?", domain).Column("id").Scan(context.Background(), &id)
+		if err == nil {
+			// log.Printf("Found domain %v in database. Id: %v", domain, id)
+		} else if err.Error() == "sql: no rows in result set" {
+			newDomain := Domain{
+				Name: domain,
+			}
+			_, err = db.NewInsert().Model(&newDomain).Returning("id").Exec(context.Background())
+			check(err)
+			id = newDomain.ID
+			// log.Printf("Created new domain %v. Id: %v", domain, id)
+		} else {
+			panic(err)
+		}
+
+		domainIdCache[domain] = id
+
+	} else {
+		// log.Printf("Found domain %v in cache. Id: %v", domain, id)
 	}
 
 	return id
