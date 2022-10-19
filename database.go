@@ -47,8 +47,9 @@ type LinkKeywordRel struct {
 }
 
 type Site struct {
-	ID  int64 `bun:",pk,autoincrement"`
-	Url string
+	ID     int64 `bun:",pk,autoincrement"`
+	Domain string
+	Url    string
 }
 
 type Content struct {
@@ -128,24 +129,25 @@ func getDb() *bun.DB {
 	return db
 }
 
-func getSiteID(urlStr string) int64 {
-	site := &Site{Url: urlStr}
+func getSiteID(urlP *url.URL) int64 {
+	site := &Site{Url: urlP.String()}
 
-	id, err := rdb.HGet("SiteIDs", urlStr).Int64()
+	id, err := rdb.HGet("SiteIDs", urlP.String()).Int64()
 	checkRedisErr(err)
 	site.ID = id
 	if id == 0 {
-		err = db.NewSelect().Model(site).Where("url = ?", urlStr).Scan(context.Background(), site)
+		err = db.NewSelect().Model(site).Where("url = ?", urlP).Scan(context.Background(), site)
 		if err != nil || site.ID == 0 {
 			// create new site
-			site.Url = urlStr
+			site.Url = urlP.String()
+			site.Domain = urlP.Hostname()
 			_, err := db.NewInsert().Model(site).Returning("id").Exec(context.Background())
 			handleBunSqlErr(err)
 		}
 		if site.ID == 0 {
 			panic("ERROR with siteId")
 		}
-		err = rdb.HSet("SiteIDs", urlStr, site.ID).Err()
+		err = rdb.HSet("SiteIDs", urlP.String(), site.ID).Err()
 		checkRedisErr(err)
 
 		return site.ID

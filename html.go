@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"golang.org/x/net/html"
@@ -38,55 +39,56 @@ func extractFromPage(outChan chan<- *Link, qPriority int) {
 			continue
 		}
 
-		// GET the url
-		resp, err := http.Get(url.String())
-		if err != nil {
-			logErrorToDb(err, ErrorUrlGet, url.String())
-			continue
-		}
-		defer resp.Body.Close()
-
-		// check if response body is to large for use to handle
-		if resp.ContentLength >= maxFilesize {
-			logErrorToDb(err, ErrorResponseToBig, url.String())
-			continue
-		}
-
-		// read body
-		body = body[:0]
-		for {
-			n, err = resp.Body.Read(body[len(body):cap(body)])
-			body = body[:len(body)+n]
+		// GET the body using chrome
+		if *useChromedp && !strings.HasSuffix(rawUrl, ".jpg") && !strings.HasSuffix(rawUrl, ".png") && !strings.HasSuffix(rawUrl, ".mp4") && !strings.HasSuffix(rawUrl, ".js") && !strings.HasSuffix(rawUrl, ".jpeg") {
+			bodyStr := getPageWithChrome(url.String())
+			body = []byte(*bodyStr)
+		} else {
+			// GET the url
+			resp, err := http.Get(url.String())
 			if err != nil {
-				break
+				logErrorToDb(err, ErrorUrlGet, url.String())
+				continue
 			}
-		}
-		n = len(body)
+			defer resp.Body.Close()
 
-		// handle body read errors
-		if err != nil && err != io.EOF {
-			logErrorToDb(err, ErrorReadingBody, url.String())
-			continue
-		}
-		if n == 0 {
-			logErrorToDb(nil, ErrorBodyLenZero, url.String())
-			continue
-		}
+			// check if response body is to large for use to handle
+			if resp.ContentLength >= maxFilesize {
+				logErrorToDb(err, ErrorResponseToBig, url.String())
+				continue
+			}
 
-		// check if content length indicated in the http header equals the number of bytes that we did actually read
-		if n != int(resp.ContentLength) && resp.ContentLength != -1 {
-			logErrorToDb(err, ErrorResponseSizeUneqContLen, url.String())
+			// read body
+			body = body[:0]
+			for {
+				n, err = resp.Body.Read(body[len(body):cap(body)])
+				body = body[:len(body)+n]
+				if err != nil {
+					break
+				}
+			}
+			n = len(body)
+
+			// handle body read errors
+			if err != nil && err != io.EOF {
+				logErrorToDb(err, ErrorReadingBody, url.String())
+				continue
+			}
+			if n == 0 {
+				logErrorToDb(nil, ErrorBodyLenZero, url.String())
+				continue
+			}
+
+			// check if content length indicated in the http header equals the number of bytes that we did actually read
+			if n != int(resp.ContentLength) && resp.ContentLength != -1 {
+				logErrorToDb(err, ErrorResponseSizeUneqContLen, url.String())
+			}
 		}
 
 		// Retrieve content information
 		sha512Sum := sha512.Sum512(body)
 		sha1Sum := sha1.Sum(body)
-		var contentTypeStr string
-		if n >= 512 {
-			contentTypeStr = http.DetectContentType(body[:512])
-		} else {
-			contentTypeStr = http.DetectContentType(body)
-		}
+		contentTypeStr := http.DetectContentType(body)
 
 		sha1SumUrlBase64 := base64.URLEncoding.EncodeToString(sha1Sum[:])
 
@@ -133,13 +135,12 @@ func extractFromPage(outChan chan<- *Link, qPriority int) {
 		}
 
 		content := Content{
-			TimeFound:      time.Now().UnixMicro(),
-			SiteID:         getSiteID(url.String()),
-			ContentTypeId:  getContentTypeId(contentTypeStr),
-			HttpStatusCode: resp.StatusCode,
-			Size:           n,
-			Sha512Sum:      &sha512Sum,
-			Sha1Sum:        &sha1Sum,
+			TimeFound:     time.Now().UnixMicro(),
+			SiteID:        getSiteID(url),
+			ContentTypeId: getContentTypeId(contentTypeStr),
+			Size:          n,
+			Sha512Sum:     &sha512Sum,
+			Sha1Sum:       &sha1Sum,
 		}
 		_, err = db.NewInsert().Model(&content).Returning("id").Exec(context.Background())
 		handleBunSqlErr(err)
@@ -162,9 +163,9 @@ func extractFromPage(outChan chan<- *Link, qPriority int) {
 		}
 
 		// check if content type is html, otherwise the file can not be searched for links
-		if len(contentTypeStr) >= 9 && contentTypeStr[:9] != "text/html" {
-			continue
-		}
+		// if strings.HasSuffix(url.String(), ".jpeg") && strings.HasSuffix(url.String(), ".png") && strings.HasSuffix(url.String(), ".jpg") && len(contentTypeStr) >= 9 && contentTypeStr[:9] != "text/html" {
+		// 	continue
+		// }
 
 		// parse html
 		rootNode, err := html.Parse(bytes.NewReader(body))

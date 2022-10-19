@@ -29,6 +29,7 @@ var knownDomains sync.Map
 var goodDomains sync.Map
 var knownUrlsFilter *bloom.BloomFilter
 var debugMode bool
+var useChromedp *bool
 
 func main() {
 	// create a channel to receive certain syscalls
@@ -37,6 +38,7 @@ func main() {
 	// parse command line arguments
 	numOfRoutines := flag.Int("n", 3, "Number of crawlers to run in parallel")
 	debugModeP := flag.Bool("debug", false, "Run program in debug mode")
+	useChromedp = flag.Bool("chrome", false, "Use chrome to browse html")
 	flag.Parse()
 	debugMode = *debugModeP
 
@@ -73,10 +75,10 @@ func main() {
 		go saveNewLink(linksChan, newUrls, flaggedWords)
 		go saveNewLink(linksChan, newUrls, flaggedWords)
 		go extractFromPage(linksChan, 90)
+		go extractFromPage(linksChan, 90)
+		go extractFromPage(linksChan, 90)
 		go extractFromPage(linksChan, 80)
 		go extractFromPage(linksChan, 70)
-		go extractFromPage(linksChan, 60)
-		go extractFromPage(linksChan, 50)
 		go extractFromPage(linksChan, 50)
 		go extractFromPage(linksChan, 50)
 		go extractFromPage(linksChan, 50)
@@ -86,7 +88,7 @@ func main() {
 	for {
 		time.Sleep(5 * time.Second)
 
-		log.Printf("Visited %v links", sitesIndexed)
+		log.Printf("Found %v links", sitesIndexed)
 	}
 }
 

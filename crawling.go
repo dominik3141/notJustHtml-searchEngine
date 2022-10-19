@@ -49,8 +49,8 @@ func saveNewLink(inChan <-chan *Link, outChan chan<- *Link, flaggedWords *[]Flag
 		// create a link relation from our Link struct
 		linkRel := &LinkRel{
 			TimeFound:   link.TimeFound.UnixMicro(),
-			Origin:      getSiteID(link.OrigUrl.String()),
-			Destination: getSiteID(link.DestUrl.String()),
+			Origin:      getSiteID(link.OrigUrl),
+			Destination: getSiteID(link.DestUrl),
 		}
 
 		// Use the keywords associated with the link to calculate an importance rating
@@ -64,7 +64,7 @@ func saveNewLink(inChan <-chan *Link, outChan chan<- *Link, flaggedWords *[]Flag
 		link.Priority = calcLinkPriority(link)
 
 		// overwrite link priority if link rating is high enough
-		if link.Rating > 20 && link.Priority < 100 {
+		if link.Rating > 20 && link.Priority < 90 {
 			link.Priority = 80
 		}
 
@@ -75,8 +75,7 @@ func saveNewLink(inChan <-chan *Link, outChan chan<- *Link, flaggedWords *[]Flag
 		// save the keywords in the database
 		for i := range *link.Keywords {
 			keyword := &LinkKeywordRel{
-				LinkId: linkRel.ID,
-				// SiteId:     getSiteID(link.DestUrl.String()),
+				LinkId:     linkRel.ID,
 				Visibility: (*link.Keywords)[i].Visibility,
 				Text:       (*link.Keywords)[i].Text,
 			}
@@ -179,7 +178,7 @@ func addStartSites(out chan *Link) {
 	for scanner.Scan() {
 		url, err := url.Parse(scanner.Text())
 		check(err)
-		out <- &Link{DestUrl: url, Priority: 60}
+		out <- &Link{DestUrl: url, Priority: 50}
 	}
 
 	check(scanner.Err())
