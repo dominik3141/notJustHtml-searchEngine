@@ -34,7 +34,6 @@ var (
 )
 
 // var domainIdCache = make(map[string]int64)
-// var insertDomain sync.Mutex
 
 func main() {
 	// create a channel to receive certain syscalls

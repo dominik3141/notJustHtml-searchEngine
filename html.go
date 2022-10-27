@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/sha1"
 	"crypto/sha512"
-	"encoding/base64"
 	"fmt"
 	"io"
 	"log"
@@ -48,7 +47,7 @@ func extractFromPage(outChan chan<- *Link, qPriority int) {
 		}
 
 		// GET the body using chrome
-		if *useChromedp && !strings.HasSuffix(rawUrl, ".jpg") && !strings.HasSuffix(rawUrl, ".png") && !strings.HasSuffix(rawUrl, ".mp4") && !strings.HasSuffix(rawUrl, ".js") && !strings.HasSuffix(rawUrl, ".jpeg") {
+		if *useChromedp && !(strings.HasSuffix(rawUrl, ".jpg") || strings.HasSuffix(rawUrl, ".png") || strings.HasSuffix(rawUrl, ".mp4") || strings.HasSuffix(rawUrl, ".js") || strings.HasSuffix(rawUrl, ".jpeg")) {
 			bodyStr := getPageWithChrome(url.String())
 			body = []byte(*bodyStr)
 		} else {
@@ -98,17 +97,14 @@ func extractFromPage(outChan chan<- *Link, qPriority int) {
 		sha1Sum := sha1.Sum(body)
 		contentTypeStr := http.DetectContentType(body)
 
-		sha1SumUrlBase64 := base64.URLEncoding.EncodeToString(sha1Sum[:])
-
 		var percHashes *PerceptualHash
 		var exif *ExifInfo
 		var faces []face.Face
 		err = nil
+
+		saveFileToDatabase(&sha1Sum, &body)
 		switch contentTypeStr {
-		case "text/html":
-		case "text/javascript":
 		case "image/png":
-			saveToFile(sha1SumUrlBase64+".png", &body)
 			percHashes = calcPercptualHashes(contentTypeStr, bytes.NewReader(body), url.String())
 			exif = getExif(bytes.NewReader(body), url.String())
 			faces, err = indexFile(&body, false, true)
@@ -116,42 +112,12 @@ func extractFromPage(outChan chan<- *Link, qPriority int) {
 				logErrorToDb(err, ErrorFaceRecognition, url.String())
 			}
 		case "image/jpeg":
-			saveToFile(sha1SumUrlBase64+".jpg", &body)
 			percHashes = calcPercptualHashes(contentTypeStr, bytes.NewReader(body), url.String())
 			exif = getExif(bytes.NewReader(body), url.String())
 			faces, err = indexFile(&body, false, false)
 			if err != nil {
 				logErrorToDb(err, ErrorFaceRecognition, url.String())
 			}
-
-			//
-			//
-			// case "application/x-gzip":
-			// 	saveToFile(sha1SumUrlBase64+".gz", &body)
-			// case "text/plain":
-			// saveToFile(sha1SumUrlBase64+".txt", &body)
-		case "application/java-archive":
-			saveToFile(sha1SumUrlBase64+".jar", &body)
-		case "text/csv":
-			saveToFile(sha1SumUrlBase64+".csv", &body)
-		case "application/json":
-			saveToFile(sha1SumUrlBase64+".json", &body)
-		case "application/zip":
-			saveToFile(sha1SumUrlBase64+".zip", &body)
-		case "application/pdf":
-			saveToFile(sha1SumUrlBase64+".pdf", &body)
-		case "video/mp4":
-			saveToFile(sha1SumUrlBase64+".mp4", &body)
-		case "application/oxtet-stream":
-			saveToFile(sha1SumUrlBase64+".bin", &body)
-		case "application/vnd.android.package-archive":
-			saveToFile(sha1SumUrlBase64+".apk", &body)
-		case " application/x-msdownload":
-			saveToFile(sha1SumUrlBase64+".exe", &body)
-		case " application/word":
-			saveToFile(sha1SumUrlBase64+".doc", &body)
-		case " application/excel":
-			saveToFile(sha1SumUrlBase64+".xls", &body)
 		}
 
 		content := Content{
@@ -170,15 +136,6 @@ func extractFromPage(outChan chan<- *Link, qPriority int) {
 			exif.ContentId = content.ID
 			_, err = db.NewInsert().Model(exif).Exec(context.Background())
 			handleBunSqlErr(err)
-			if exif.Lat != 0 || exif.Camera != "" || exif.Timestamp != 0 {
-				_, loaded := goodDomains.LoadOrStore(url.Hostname(), true)
-				if !loaded {
-					log.Println("goodDomains+=", url.Hostname())
-				}
-				if exif.Lat != 0 {
-					saveToFile(sha1SumUrlBase64+".jpg", &body)
-				}
-			}
 		}
 
 		// insert perceptual hashes to the database
@@ -214,7 +171,9 @@ func extractFromPage(outChan chan<- *Link, qPriority int) {
 		if strings.HasSuffix(url.String(), ".jpeg") || strings.HasSuffix(url.String(), ".png") || strings.HasSuffix(url.String(), ".jpg") {
 			continue
 		}
-		log.Println("Crawling ", url.String())
+		if debugMode {
+			log.Println("Crawling ", url.String())
+		}
 
 		// parse html
 		rootNode, err := html.Parse(bytes.NewReader(body))

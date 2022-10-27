@@ -7,8 +7,6 @@ import (
 	"database/sql"
 	"log"
 	"net/url"
-	"os"
-	"path/filepath"
 
 	"time"
 
@@ -134,6 +132,8 @@ func getDb() *bun.DB {
 		check(err)
 		_, err = db.NewCreateTable().Model(&Face{}).Exec(context.Background())
 		check(err)
+		_, err = db.NewCreateTable().Model(&DbFileEntry{}).Exec(context.Background())
+		check(err)
 	}
 
 	return db
@@ -213,13 +213,18 @@ func getDomainId(domain string) int64 {
 	return id
 }
 
-func saveToFile(filename string, data *[]byte) {
-	filename = filepath.Join("downloaded", filename)
+type DbFileEntry struct {
+	Sha1Sum *[sha1.Size]byte `bun:",pk"`
+	Content *[]byte
+}
 
-	f, err := os.Create(filename)
-	check(err)
-	defer f.Close()
+// insert file into database if the file is not already inside
+func saveFileToDatabase(sha1Sum *[sha1.Size]byte, file *[]byte) {
+	dbFile := DbFileEntry{
+		Sha1Sum: sha1Sum,
+		Content: file,
+	}
 
-	_, err = f.Write(*data)
+	_, err := db.NewInsert().Model(&dbFile).Ignore().Exec(context.Background())
 	check(err)
 }
