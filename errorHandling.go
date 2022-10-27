@@ -33,6 +33,7 @@ const (
 	ErrorParsingUrl
 	ErrorUrlGet
 	ErrorBodyLenZero
+	ErrorFaceRecognition
 )
 
 func logErrorToDb(err error, errCode ErrorCode, url string) {

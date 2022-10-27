@@ -8,7 +8,8 @@ import (
 	"log"
 	"net/url"
 	"os"
-	"path"
+	"path/filepath"
+
 	"time"
 
 	"github.com/go-redis/redis"
@@ -129,7 +130,9 @@ func getDb() *bun.DB {
 		check(err)
 		_, err = db.NewCreateTable().Model(&PerceptualHash{}).Exec(context.Background())
 		check(err)
-		_, err := db.NewCreateTable().Model(&Domain{}).Exec(context.Background())
+		_, err = db.NewCreateTable().Model(&Domain{}).Exec(context.Background())
+		check(err)
+		_, err = db.NewCreateTable().Model(&Face{}).Exec(context.Background())
 		check(err)
 	}
 
@@ -190,11 +193,11 @@ func getContentTypeId(contentTypeStr string) int64 {
 
 func getDomainId(domain string) int64 {
 	var err error
-	id, found := domainIdCache[domain]
+	var id int64
+	found := false
 	if !found {
 		err = db.NewSelect().Model(&Domain{}).Where("name = ?", domain).Column("id").Scan(context.Background(), &id)
 		if err == nil {
-			// log.Printf("Found domain %v in database. Id: %v", domain, id)
 		} else if err.Error() == "sql: no rows in result set" {
 			newDomain := Domain{
 				Name: domain,
@@ -202,22 +205,16 @@ func getDomainId(domain string) int64 {
 			_, err = db.NewInsert().Model(&newDomain).Returning("id").Exec(context.Background())
 			check(err)
 			id = newDomain.ID
-			// log.Printf("Created new domain %v. Id: %v", domain, id)
 		} else {
 			panic(err)
 		}
-
-		domainIdCache[domain] = id
-
-	} else {
-		// log.Printf("Found domain %v in cache. Id: %v", domain, id)
 	}
 
 	return id
 }
 
 func saveToFile(filename string, data *[]byte) {
-	filename = path.Join("downloaded", filename)
+	filename = filepath.Join("downloaded", filename)
 
 	f, err := os.Create(filename)
 	check(err)

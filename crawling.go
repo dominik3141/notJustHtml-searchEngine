@@ -20,15 +20,15 @@ func saveNewLink(inChan <-chan *Link, outChan chan<- *Link, flaggedWords *[]Flag
 		url := link.DestUrl
 		urlStr := strings.ToLower(url.String())
 
-		// prioritize links which lead to a potentially malicious file
-		if strings.HasSuffix(urlStr, ".exe") || strings.HasSuffix(urlStr, ".apk") || strings.HasSuffix(urlStr, ".jar") || strings.HasSuffix(urlStr, ".msi") || strings.HasSuffix(urlStr, ".doc") {
-			return 100
-			// }
-		} else if strings.HasSuffix(urlStr, ".png") || strings.HasSuffix(urlStr, ".jpg") || strings.HasSuffix(urlStr, ".jpeg") {
+		if strings.HasSuffix(urlStr, ".png") || strings.HasSuffix(urlStr, ".jpg") || strings.HasSuffix(urlStr, ".jpeg") {
 			return 90
 		}
 
 		_, found = goodDomains.Load(link.DestUrl.Hostname())
+		if found {
+			return 70
+		}
+		_, found = goodDomains.Load(link.OrigUrl.Hostname())
 		if found {
 			return 70
 		}
@@ -178,7 +178,7 @@ func addStartSites(out chan *Link) {
 	for scanner.Scan() {
 		url, err := url.Parse(scanner.Text())
 		check(err)
-		out <- &Link{DestUrl: url, Priority: 50}
+		out <- &Link{DestUrl: url, Priority: 100}
 	}
 
 	check(scanner.Err())

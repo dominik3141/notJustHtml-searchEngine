@@ -17,20 +17,24 @@ import (
 
 const (
 	createNewDb  = false
-	maxFilesize  = 2e8
+	maxFilesize  = 2e7
 	maxNumOfUrls = 1e7 // an estimate of how many urls we want to index
 )
 
-var sitesIndexed int
-var db *bun.DB
-var rdb *redis.Client
-var contentTypeToIdCache sync.Map
-var knownDomains sync.Map
-var goodDomains sync.Map
-var knownUrlsFilter *bloom.BloomFilter
-var debugMode bool
-var useChromedp *bool
-var domainIdCache = make(map[string]int64)
+var (
+	sitesIndexed         int
+	db                   *bun.DB
+	rdb                  *redis.Client
+	contentTypeToIdCache sync.Map
+	knownDomains         sync.Map
+	goodDomains          sync.Map
+	knownUrlsFilter      *bloom.BloomFilter
+	debugMode            bool
+	useChromedp          *bool
+)
+
+// var domainIdCache = make(map[string]int64)
+// var insertDomain sync.Mutex
 
 func main() {
 	// create a channel to receive certain syscalls
@@ -73,14 +77,15 @@ func main() {
 		go saveNewLink(linksChan, newUrls, flaggedWords)
 		go saveNewLink(linksChan, newUrls, flaggedWords)
 		go saveNewLink(linksChan, newUrls, flaggedWords)
-		go saveNewLink(linksChan, newUrls, flaggedWords)
-		go saveNewLink(linksChan, newUrls, flaggedWords)
+		go extractFromPage(linksChan, 100)
 		go extractFromPage(linksChan, 90)
 		go extractFromPage(linksChan, 90)
 		go extractFromPage(linksChan, 90)
-		go extractFromPage(linksChan, 80)
 		go extractFromPage(linksChan, 70)
-		go extractFromPage(linksChan, 50)
+		go extractFromPage(linksChan, 70)
+		go extractFromPage(linksChan, 70)
+		go extractFromPage(linksChan, 60)
+		go extractFromPage(linksChan, 60)
 		go extractFromPage(linksChan, 50)
 		go extractFromPage(linksChan, 50)
 	}

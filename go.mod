@@ -3,6 +3,7 @@ module main
 go 1.18
 
 require (
+	github.com/Kagami/go-face v0.0.0-20210630145111-0c14797b4d0e
 	github.com/bits-and-blooms/bloom/v3 v3.3.1
 	github.com/chromedp/cdproto v0.0.0-20221011223153-490dc4d81f7c
 	github.com/chromedp/chromedp v0.8.6

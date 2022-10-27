@@ -8,11 +8,13 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
+	"github.com/Kagami/go-face"
 	"golang.org/x/net/html"
 )
 
@@ -37,6 +39,12 @@ func extractFromPage(outChan chan<- *Link, qPriority int) {
 		if err != nil {
 			logErrorToDb(err, ErrorParsingUrl, rawUrl)
 			continue
+		}
+		if qPriority == 100 {
+			_, loaded := goodDomains.LoadOrStore(url.Hostname(), true)
+			if !loaded {
+				log.Println("goodDomains+=", url.Hostname())
+			}
 		}
 
 		// GET the body using chrome
@@ -94,22 +102,34 @@ func extractFromPage(outChan chan<- *Link, qPriority int) {
 
 		var percHashes *PerceptualHash
 		var exif *ExifInfo
+		var faces []face.Face
 		err = nil
 		switch contentTypeStr {
 		case "text/html":
 		case "text/javascript":
 		case "image/png":
-			// saveToFile(sha1SumUrlBase64+".png", &body)
+			saveToFile(sha1SumUrlBase64+".png", &body)
 			percHashes = calcPercptualHashes(contentTypeStr, bytes.NewReader(body), url.String())
 			exif = getExif(bytes.NewReader(body), url.String())
+			faces, err = indexFile(&body, false, true)
+			if err != nil {
+				logErrorToDb(err, ErrorFaceRecognition, url.String())
+			}
 		case "image/jpeg":
-			// saveToFile(sha1SumUrlBase64+".jpg", &body)
+			saveToFile(sha1SumUrlBase64+".jpg", &body)
 			percHashes = calcPercptualHashes(contentTypeStr, bytes.NewReader(body), url.String())
 			exif = getExif(bytes.NewReader(body), url.String())
-		case "application/x-gzip":
-			saveToFile(sha1SumUrlBase64+".gz", &body)
-		case "text/plain":
-			saveToFile(sha1SumUrlBase64+".txt", &body)
+			faces, err = indexFile(&body, false, false)
+			if err != nil {
+				logErrorToDb(err, ErrorFaceRecognition, url.String())
+			}
+
+			//
+			//
+			// case "application/x-gzip":
+			// 	saveToFile(sha1SumUrlBase64+".gz", &body)
+			// case "text/plain":
+			// saveToFile(sha1SumUrlBase64+".txt", &body)
 		case "application/java-archive":
 			saveToFile(sha1SumUrlBase64+".jar", &body)
 		case "text/csv":
@@ -150,8 +170,14 @@ func extractFromPage(outChan chan<- *Link, qPriority int) {
 			exif.ContentId = content.ID
 			_, err = db.NewInsert().Model(exif).Exec(context.Background())
 			handleBunSqlErr(err)
-			if exif.Lat != 0 {
-				goodDomains.LoadOrStore(url.Hostname(), true)
+			if exif.Lat != 0 || exif.Camera != "" || exif.Timestamp != 0 {
+				_, loaded := goodDomains.LoadOrStore(url.Hostname(), true)
+				if !loaded {
+					log.Println("goodDomains+=", url.Hostname())
+				}
+				if exif.Lat != 0 {
+					saveToFile(sha1SumUrlBase64+".jpg", &body)
+				}
 			}
 		}
 
@@ -162,10 +188,33 @@ func extractFromPage(outChan chan<- *Link, qPriority int) {
 			handleBunSqlErr(err)
 		}
 
+		// insert face profiles to the database
+		if faces != nil && len(faces) != 0 {
+			for i := range faces {
+				dbFace := Face{
+					ContentId:  content.ID,
+					Descriptor: faces[i].Descriptor,
+					Rectangle:  faces[i].Rectangle,
+					Shapes:     faces[i].Shapes,
+				}
+
+				_, err = db.NewInsert().Model(&dbFace).Exec(context.Background())
+				check(err)
+			}
+		}
+
 		// check if content type is html, otherwise the file can not be searched for links
-		// if strings.HasSuffix(url.String(), ".jpeg") && strings.HasSuffix(url.String(), ".png") && strings.HasSuffix(url.String(), ".jpg") && len(contentTypeStr) >= 9 && contentTypeStr[:9] != "text/html" {
-		// 	continue
-		// }
+		if len(contentTypeStr) >= 9 && contentTypeStr[:9] != "text/html" {
+			continue
+		}
+		if len(contentTypeStr) < 9 {
+			continue
+		}
+
+		if strings.HasSuffix(url.String(), ".jpeg") || strings.HasSuffix(url.String(), ".png") || strings.HasSuffix(url.String(), ".jpg") {
+			continue
+		}
+		log.Println("Crawling ", url.String())
 
 		// parse html
 		rootNode, err := html.Parse(bytes.NewReader(body))
