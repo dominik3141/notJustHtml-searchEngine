@@ -1,6 +1,7 @@
 package main
 
 import (
+	"log"
 	"net/url"
 	"time"
 
@@ -17,14 +18,14 @@ func getAllLinks(originUrl *url.URL, node *html.Node, links chan<- *Link) {
 				linkDst, err := url.Parse(a.Val)
 				if err != nil {
 					logErrorToDb(err, ErrorParsingUrl, a.Val)
+					if debugMode {
+						log.Println("Error:", err)
+					}
 					break
 				}
 
 				// correct urls that do not contain a hostname
-				if linkDst.Hostname() == "" {
-					linkDst.Host = originUrl.Host
-					linkDst.Scheme = originUrl.Scheme
-				}
+				linkDst = originUrl.ResolveReference(linkDst)
 
 				reducedNode := reduceHtmlNode(c)
 				keywords := extractKeywords(reducedNode, 1)
@@ -36,6 +37,9 @@ func getAllLinks(originUrl *url.URL, node *html.Node, links chan<- *Link) {
 					Keywords:  &keywords,
 				}
 
+				if debugMode {
+					log.Println("New link:", linkDst.String())
+				}
 				links <- &link
 			}
 		}

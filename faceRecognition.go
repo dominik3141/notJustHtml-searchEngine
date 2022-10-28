@@ -18,14 +18,9 @@ type Face struct {
 	Shapes     []image.Point
 }
 
-func indexFile(fileBytes *[]byte, useCNN bool, isPNG bool) ([]face.Face, error) {
-	const modelsDir = "faceRecognition/models"
-
-	// should we rather reuse a single face recognizer?
-	rec, err := face.NewRecognizer(modelsDir)
-	check(err)
-
+func indexFile(rec *face.Recognizer, fileBytes *[]byte, useCNN bool, isPNG bool) ([]face.Face, error) {
 	var faces []face.Face
+	var err error
 
 	if isPNG {
 		reader := bytes.NewReader(*fileBytes)

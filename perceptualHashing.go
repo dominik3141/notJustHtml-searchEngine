@@ -54,7 +54,6 @@ func calcPercptualHashes(mimeType string, file io.Reader, urlStr string) *Percep
 func getExif(file io.Reader, urlStr string) *ExifInfo {
 	x, err := exif.Decode(file)
 	if err != nil {
-		logErrorToDb(err, ErrorReadExif, urlStr)
 		return nil
 	}
 
@@ -65,25 +64,17 @@ func getExif(file io.Reader, urlStr string) *ExifInfo {
 		camModelStr, err := camModel.StringVal()
 		if err == nil {
 			ret.Camera = camModelStr
-		} else {
-			logErrorToDb(err, ErrorReadExif, urlStr)
 		}
-	} else {
-		logErrorToDb(err, ErrorReadExif, urlStr)
 	}
 
 	tm, err := x.DateTime()
 	if err == nil {
 		ret.Timestamp = tm.UnixMicro()
-	} else {
-		logErrorToDb(err, ErrorReadExif, urlStr)
 	}
 
 	lat, long, err := x.LatLong()
 	if err == nil {
 		ret.Lat, ret.Long = lat, long
-	} else {
-		logErrorToDb(err, ErrorReadExif, urlStr)
 	}
 
 	if ret.Timestamp == 0 && ret.Camera == "" && ret.Lat == 0 {

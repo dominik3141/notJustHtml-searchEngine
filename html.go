@@ -23,6 +23,10 @@ func extractFromPage(outChan chan<- *Link, qPriority int) {
 	var rawUrl string
 	var err error
 
+	const modelsDir = "faceRecognition/models"
+	rec, err := face.NewRecognizer(modelsDir)
+	check(err)
+
 	for {
 		for {
 			rawUrl, err = rdb.SPop(fmt.Sprintf("QueuePriority%v", qPriority)).Result()
@@ -38,12 +42,6 @@ func extractFromPage(outChan chan<- *Link, qPriority int) {
 		if err != nil {
 			logErrorToDb(err, ErrorParsingUrl, rawUrl)
 			continue
-		}
-		if qPriority == 100 {
-			_, loaded := goodDomains.LoadOrStore(url.Hostname(), true)
-			if !loaded {
-				log.Println("goodDomains+=", url.Hostname())
-			}
 		}
 
 		// GET the body using chrome
@@ -107,14 +105,14 @@ func extractFromPage(outChan chan<- *Link, qPriority int) {
 		case "image/png":
 			percHashes = calcPercptualHashes(contentTypeStr, bytes.NewReader(body), url.String())
 			exif = getExif(bytes.NewReader(body), url.String())
-			faces, err = indexFile(&body, false, true)
+			faces, err = indexFile(rec, &body, false, true)
 			if err != nil {
 				logErrorToDb(err, ErrorFaceRecognition, url.String())
 			}
 		case "image/jpeg":
 			percHashes = calcPercptualHashes(contentTypeStr, bytes.NewReader(body), url.String())
 			exif = getExif(bytes.NewReader(body), url.String())
-			faces, err = indexFile(&body, false, false)
+			faces, err = indexFile(rec, &body, false, false)
 			if err != nil {
 				logErrorToDb(err, ErrorFaceRecognition, url.String())
 			}
@@ -178,6 +176,9 @@ func extractFromPage(outChan chan<- *Link, qPriority int) {
 		// parse html
 		rootNode, err := html.Parse(bytes.NewReader(body))
 		if err != nil {
+			if debugMode {
+				log.Println("Parsing error:", err)
+			}
 			logErrorToDb(err, ErrorParsingHtml, url.String())
 			continue
 		}

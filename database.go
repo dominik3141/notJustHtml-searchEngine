@@ -5,6 +5,7 @@ import (
 	"crypto/sha1"
 	"crypto/sha512"
 	"database/sql"
+	"encoding/base64"
 	"log"
 	"net/url"
 
@@ -225,6 +226,11 @@ func saveFileToDatabase(sha1Sum *[sha1.Size]byte, file *[]byte) {
 		Content: file,
 	}
 
-	_, err := db.NewInsert().Model(&dbFile).Ignore().Exec(context.Background())
+	result, err := db.NewInsert().Model(&dbFile).Ignore().Exec(context.Background())
 	check(err)
+	if debugMode {
+		n, err := result.RowsAffected()
+		check(err)
+		log.Printf("Added %v files to database. Hash: %v", n, base64.URLEncoding.EncodeToString(sha1Sum[:]))
+	}
 }

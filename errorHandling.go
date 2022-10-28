@@ -14,11 +14,6 @@ type Errors struct {
 	Url       string
 	ErrorCode ErrorCode
 	ErrorText string
-	// HttpStatusCode int
-	// ParsingError            bool
-	// ResponseToBig           bool
-	// ErrorReading            bool
-	// ResponseSizeUneqContLen bool
 }
 
 type ErrorCode int

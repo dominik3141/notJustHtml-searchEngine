@@ -26,11 +26,11 @@ var (
 	db                   *bun.DB
 	rdb                  *redis.Client
 	contentTypeToIdCache sync.Map
-	knownDomains         sync.Map
-	goodDomains          sync.Map
-	knownUrlsFilter      *bloom.BloomFilter
-	debugMode            bool
-	useChromedp          *bool
+	// knownDomains         sync.Map
+	// goodDomains          sync.Map
+	knownUrlsFilter *bloom.BloomFilter
+	debugMode       bool
+	useChromedp     *bool
 )
 
 // var domainIdCache = make(map[string]int64)
@@ -63,7 +63,7 @@ func main() {
 	flaggedWords := loadFlaggedWords()
 
 	// add to startSites
-	addStartSites(newUrls)
+	addStartSites()
 
 	// handle SIGTERM
 	go handleSigTerm(sigChan)
@@ -71,22 +71,22 @@ func main() {
 
 	// start goroutines
 	for i := 1; i <= *numOfRoutines; i++ {
+		// go addToQueue(newUrls)
 		go addToQueue(newUrls)
-		go addToQueue(newUrls)
+		// go saveNewLink(linksChan, newUrls, flaggedWords)
 		go saveNewLink(linksChan, newUrls, flaggedWords)
-		go saveNewLink(linksChan, newUrls, flaggedWords)
-		go saveNewLink(linksChan, newUrls, flaggedWords)
-		go extractFromPage(linksChan, 100)
+		// go saveNewLink(linksChan, newUrls, flaggedWords)
 		go extractFromPage(linksChan, 90)
-		go extractFromPage(linksChan, 90)
-		go extractFromPage(linksChan, 90)
-		go extractFromPage(linksChan, 70)
-		go extractFromPage(linksChan, 70)
-		go extractFromPage(linksChan, 70)
-		go extractFromPage(linksChan, 60)
-		go extractFromPage(linksChan, 60)
-		go extractFromPage(linksChan, 50)
-		go extractFromPage(linksChan, 50)
+		// go extractFromPage(linksChan, 90)
+		// go extractFromPage(linksChan, 90)
+		// go extractFromPage(linksChan, 90)
+		// go extractFromPage(linksChan, 70)
+		// go extractFromPage(linksChan, 70)
+		// go extractFromPage(linksChan, 70)
+		// go extractFromPage(linksChan, 60)
+		// go extractFromPage(linksChan, 60)
+		// go extractFromPage(linksChan, 50)
+		// go extractFromPage(linksChan, 50)
 	}
 
 	// print a status update every two seconds
@@ -99,7 +99,6 @@ func main() {
 
 func initBloom(db *bun.DB, filter *bloom.BloomFilter) {
 	sites := make([]Site, 0, 4096)
-	// urls := new([]Site)
 	err := db.NewSelect().Model(&Site{}).Scan(context.Background(), &sites)
 	handleBunSqlErr(err)
 	log.Printf("Adding %v urls to the bloom filter", len(sites))

@@ -6,7 +6,7 @@ import (
 	"encoding/csv"
 	"fmt"
 	"io"
-	"net/url"
+	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -14,7 +14,6 @@ import (
 
 func saveNewLink(inChan <-chan *Link, outChan chan<- *Link, flaggedWords *[]FlaggedWord) {
 	var rating float64
-	var found bool
 
 	calcLinkPriority := func(link *Link) int {
 		url := link.DestUrl
@@ -24,22 +23,7 @@ func saveNewLink(inChan <-chan *Link, outChan chan<- *Link, flaggedWords *[]Flag
 			return 90
 		}
 
-		_, found = goodDomains.Load(link.DestUrl.Hostname())
-		if found {
-			return 70
-		}
-		_, found = goodDomains.Load(link.OrigUrl.Hostname())
-		if found {
-			return 70
-		}
-
-		// check if domain has been discovered before
-		_, isKnown := knownDomains.LoadOrStore(url.Hostname(), true)
-		if !isKnown {
-			return 60
-		}
-
-		return 50
+		return 0
 	}
 
 	for {
@@ -166,7 +150,7 @@ func loadFlaggedWords() *[]FlaggedWord {
 	}
 }
 
-func addStartSites(out chan *Link) {
+func addStartSites() {
 	const filename = "config/links.txt"
 
 	f, err := os.Open(filename)
@@ -175,10 +159,16 @@ func addStartSites(out chan *Link) {
 
 	scanner := bufio.NewScanner(f)
 
+	counter := 0
 	for scanner.Scan() {
-		url, err := url.Parse(scanner.Text())
-		check(err)
-		out <- &Link{DestUrl: url, Priority: 100}
+		counter++
+		if debugMode {
+			log.Println("Adding start side with url:", scanner.Text())
+			log.Println("Urls added so far:", counter)
+		}
+		// add link to queue
+		err = rdb.SAdd("QueuePriority90", scanner.Text()).Err()
+		checkRedisErr(err)
 	}
 
 	check(scanner.Err())
