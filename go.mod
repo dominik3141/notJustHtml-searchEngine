@@ -1,6 +1,6 @@
 module main
 
-go 1.18
+go 1.23.0
 
 require (
 	github.com/Kagami/go-face v0.0.0-20210630145111-0c14797b4d0e
@@ -8,7 +8,7 @@ require (
 	github.com/chromedp/cdproto v0.0.0-20221011223153-490dc4d81f7c
 	github.com/chromedp/chromedp v0.8.6
 	github.com/lib/pq v1.10.7
-	golang.org/x/net v0.0.0-20221004154528-8021a29435af
+	golang.org/x/net v0.38.0
 )
 
 require (
@@ -35,5 +35,5 @@ require (
 	github.com/uptrace/bun/dialect/pgdialect v1.1.8
 	github.com/vmihailenco/msgpack/v5 v5.3.5 // indirect
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
-	golang.org/x/sys v0.0.0-20220928140112-f11e5e49a4ec // indirect
+	golang.org/x/sys v0.31.0 // indirect
 )
